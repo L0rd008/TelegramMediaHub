@@ -2,6 +2,8 @@ services:
   bot:
     build: .
     env_file: .env
+    ports:
+      - "127.0.0.1:8443:8443"
     depends_on:
       postgres:
         condition: service_healthy

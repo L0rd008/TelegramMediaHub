@@ -76,7 +76,8 @@ class SubscriptionRepo:
         We look for chats where that date falls on the target day.
         """
         now = datetime.now(timezone.utc)
-        target_date = now + timedelta(days=days_before)
+        # Chat.registered_at is stored without tzinfo, so use naive UTC bounds.
+        target_date = datetime.utcnow() + timedelta(days=days_before)
         trial_offset = timedelta(days=settings.TRIAL_DAYS)
 
         # Trial expiry = registered_at + TRIAL_DAYS

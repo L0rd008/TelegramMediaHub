@@ -73,6 +73,7 @@ selfsend - Toggle self-send or show toggle panel
 broadcast - Control broadcasts or show broadcast panel
 subscribe - View premium plans and subscribe
 plan - Show subscription status with action buttons
+stats - View your chat and usage statistics
 status - Bot status with action buttons (admin)
 list - Paginated chat list with navigation (admin)
 signature - Set signature text (admin)

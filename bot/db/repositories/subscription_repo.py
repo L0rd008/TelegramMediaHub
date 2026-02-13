@@ -114,6 +114,19 @@ class SubscriptionRepo:
         )
         return result.scalar_one()
 
+    async def count_subscription_breakdown(self) -> dict[str, int]:
+        """Count active subscriptions grouped by plan.
+
+        Returns e.g. {"week": 3, "month": 15, "year": 2}.
+        """
+        now = datetime.now(timezone.utc)
+        result = await self._s.execute(
+            select(Subscription.plan, func.count())
+            .where(Subscription.expires_at > now)
+            .group_by(Subscription.plan)
+        )
+        return {row[0]: row[1] for row in result.all()}
+
     async def revoke_subscription(self, chat_id: int) -> bool:
         """Expire all active subscriptions for a chat immediately.
 

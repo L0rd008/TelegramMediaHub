@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.send_log import SendLog
@@ -82,3 +82,37 @@ class SendLogRepo:
             .where(SendLog.source_user_id == user_id)
         )
         return [(row.dest_chat_id, row.dest_message_id) for row in result.all()]
+
+    # ── Stats queries ────────────────────────────────────────────────
+
+    async def count_messages_from_chat(self, chat_id: int) -> int:
+        """Count messages sent FROM this chat (within send_log retention)."""
+        result = await self._s.execute(
+            select(func.count())
+            .select_from(SendLog)
+            .where(SendLog.source_chat_id == chat_id)
+        )
+        return result.scalar_one()
+
+    async def count_messages_to_chat(self, chat_id: int) -> int:
+        """Count messages sent TO this chat (within send_log retention)."""
+        result = await self._s.execute(
+            select(func.count())
+            .select_from(SendLog)
+            .where(SendLog.dest_chat_id == chat_id)
+        )
+        return result.scalar_one()
+
+    async def count_total_distributed(self) -> int:
+        """Total rows in send_log (all messages distributed within retention)."""
+        result = await self._s.execute(
+            select(func.count()).select_from(SendLog)
+        )
+        return result.scalar_one()
+
+    async def count_unique_senders(self) -> int:
+        """Distinct source_user_id values in send_log (within retention)."""
+        result = await self._s.execute(
+            select(func.count(func.distinct(SendLog.source_user_id)))
+        )
+        return result.scalar_one()

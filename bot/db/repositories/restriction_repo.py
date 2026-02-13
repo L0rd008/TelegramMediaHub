@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.user_restriction import UserRestriction
@@ -91,3 +91,21 @@ class RestrictionRepo:
         )
         await self._s.commit()
         return (result.rowcount or 0) > 0
+
+    async def count_active_restrictions(self) -> dict[str, int]:
+        """Count active restrictions grouped by type.
+
+        Returns e.g. {"mute": 2, "ban": 5}. Expired mutes are excluded.
+        """
+        now = datetime.now(timezone.utc)
+        result = await self._s.execute(
+            select(UserRestriction.restriction_type, func.count())
+            .where(
+                UserRestriction.active == True,  # noqa: E712
+            )
+            .group_by(UserRestriction.restriction_type)
+        )
+        counts: dict[str, int] = {}
+        for rtype, cnt in result.all():
+            counts[rtype] = cnt
+        return counts

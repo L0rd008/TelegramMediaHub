@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,10 +105,35 @@ class ChatRepo:
 
     async def count_active(self) -> int:
         """Count active chats."""
-        from sqlalchemy import func
-
         result = await self._s.execute(
             select(func.count()).select_from(Chat).where(Chat.active == True)  # noqa: E712
+        )
+        return result.scalar_one()
+
+    async def count_by_type(self) -> dict[str, int]:
+        """Count active chats grouped by chat_type."""
+        result = await self._s.execute(
+            select(Chat.chat_type, func.count())
+            .where(Chat.active == True)  # noqa: E712
+            .group_by(Chat.chat_type)
+        )
+        return {row[0]: row[1] for row in result.all()}
+
+    async def count_sources(self) -> int:
+        """Count active chats with is_source=True."""
+        result = await self._s.execute(
+            select(func.count())
+            .select_from(Chat)
+            .where(Chat.active == True, Chat.is_source == True)  # noqa: E712
+        )
+        return result.scalar_one()
+
+    async def count_destinations(self) -> int:
+        """Count active chats with is_destination=True."""
+        result = await self._s.execute(
+            select(func.count())
+            .select_from(Chat)
+            .where(Chat.active == True, Chat.is_destination == True)  # noqa: E712
         )
         return result.scalar_one()
 

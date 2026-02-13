@@ -138,6 +138,7 @@ python -m bot
 | `/broadcast [off\|on in\|out]` | Control broadcasts; no args shows broadcast panel (premium) |
 | `/subscribe [chat_id]` | View premium plans and purchase via Telegram Stars |
 | `/plan` | Show subscription/trial status with contextual action buttons |
+| `/stats` | View chat stats (messages sent/received, alias, plan); admins see global stats too |
 
 ### Admin Commands (restricted to `ADMIN_USER_IDS`)
 
@@ -205,7 +206,7 @@ TelegramMediaHub/
 │   │
 │   ├── handlers/
 │   │   ├── membership.py        # my_chat_member auto-registration
-│   │   ├── start.py             # /start, /stop, /selfsend, /broadcast (with button panels)
+│   │   ├── start.py             # /start, /stop, /selfsend, /broadcast, /stats (with button panels)
 │   │   ├── admin.py             # Admin commands + moderation (with action buttons)
 │   │   ├── callbacks.py         # Unified callback query handler for all non-subscription buttons
 │   │   ├── subscription.py      # /subscribe, /plan, payment callbacks

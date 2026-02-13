@@ -247,3 +247,13 @@ def build_plan_trial_actions() -> InlineKeyboardMarkup:
         [_btn("📡 Broadcast Control", "bc:panel"), _btn("⚙️ Settings", "settings")],
         [_btn("⭐ View Plans", "sub:show")],
     ])
+
+
+# ── User/Admin: Stats contextual buttons ────────────────────────────
+
+def build_stats_actions(is_admin: bool) -> InlineKeyboardMarkup:
+    row = [_btn("⚙️ Settings", "settings"), _btn("📋 My Plan", "myplan")]
+    rows = [row]
+    if is_admin:
+        rows.append([_btn("📊 Status Dashboard", "ap:status")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

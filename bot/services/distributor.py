@@ -11,9 +11,14 @@ from aiogram import Bot
 from aiogram.exceptions import (
     TelegramBadRequest,
     TelegramForbiddenError,
-    TelegramMigrateThisChat,
     TelegramRetryAfter,
 )
+
+# aiogram renamed this exception in different 3.x releases.
+try:
+    from aiogram.exceptions import TelegramMigrateToChat  # type: ignore
+except ImportError:  # pragma: no cover - fallback for older/newer aiogram
+    from aiogram.exceptions import TelegramMigrateThisChat as TelegramMigrateToChat  # type: ignore
 
 from bot.config import settings
 from bot.db.engine import async_session
@@ -189,7 +194,7 @@ class Distributor:
                 repo = ChatRepo(session)
                 await repo.deactivate_chat(task.dest_chat_id)
 
-        except TelegramMigrateThisChat as e:
+        except TelegramMigrateToChat as e:
             # Group migrated to supergroup – update DB and re-enqueue
             new_chat_id = e.migrate_to_chat_id
             logger.warning(

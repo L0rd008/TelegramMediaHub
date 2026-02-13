@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     WEBHOOK_PORT: int = 8443
     WEBHOOK_PATH: str = "/webhook"
     WEBHOOK_SECRET: str = ""
+    # Public port for webhook URL (use 443 when behind a reverse proxy).
+    WEBHOOK_PUBLIC_PORT: int | None = None
 
     # ── Database ──────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql+asyncpg://mediahub:password@localhost:5432/mediahub"
@@ -53,7 +55,10 @@ class Settings(BaseSettings):
 
     @property
     def webhook_url(self) -> str:
-        return f"https://{self.WEBHOOK_HOST}:{self.WEBHOOK_PORT}{self.WEBHOOK_PATH}"
+        public_port = self.WEBHOOK_PUBLIC_PORT or self.WEBHOOK_PORT
+        if public_port == 443:
+            return f"https://{self.WEBHOOK_HOST}{self.WEBHOOK_PATH}"
+        return f"https://{self.WEBHOOK_HOST}:{public_port}{self.WEBHOOK_PATH}"
 
 
 settings = Settings()  # type: ignore[call-arg]

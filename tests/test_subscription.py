@@ -200,9 +200,9 @@ def test_build_pricing_text_contains_features():
     """Pricing text should list the new premium features."""
     text = build_pricing_text()
     assert "Reply threading" in text
-    assert "/mute" in text
-    assert "/unmute" in text
+    assert "/broadcast" in text
     assert "Broadcast control" in text
+    assert "Sender aliases" in text
 
 
 def test_build_pricing_text_yearly_no_per_day():

@@ -77,6 +77,8 @@ async def _on_startup(bot: Bot, redis: aioredis.Redis, dp: Dispatcher) -> None:
     from bot.models.bot_config import BotConfig  # noqa: F401
     from bot.models.send_log import SendLog  # noqa: F401
     from bot.models.subscription import Subscription  # noqa: F401
+    from bot.models.user_alias import UserAlias  # noqa: F401
+    from bot.models.user_restriction import UserRestriction  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

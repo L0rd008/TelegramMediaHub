@@ -48,6 +48,9 @@ class NormalizedMessage:
     # Media group items (populated only for MEDIA_GROUP type)
     group_items: list[NormalizedMessage] = field(default_factory=list)
 
+    # Sender identity (None for channel posts without from_user)
+    source_user_id: int | None = None
+
     # Reply threading – set by the message handler after send_log reverse lookup
     reply_source_chat_id: int | None = None
     reply_source_message_id: int | None = None
@@ -89,6 +92,7 @@ def normalize(message: Message) -> NormalizedMessage | None:
     base = dict(
         source_chat_id=message.chat.id,
         source_message_id=message.message_id,
+        source_user_id=message.from_user.id if message.from_user else None,
         media_group_id=message.media_group_id,
         show_caption_above_media=bool(getattr(message, "show_caption_above_media", False)),
     )

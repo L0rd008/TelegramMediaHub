@@ -141,7 +141,7 @@ class Distributor:
             text = (
                 f"🔒 You missed {missed_text} from your network today.\n\n"
                 "Premium includes cross-chat content, reply threading, "
-                "and broadcast control — from just <b>25 ⭐/day</b>."
+                "broadcast control, and sender aliases — from just <b>25 ⭐/day</b>."
             )
             await self._bot.send_message(
                 chat_id,
@@ -177,10 +177,20 @@ class Distributor:
             # Build signature
             signature = await self._get_signature()
 
+            # Look up sender alias
+            sender_alias: str | None = None
+            if msg.source_user_id:
+                from bot.services.alias import get_alias
+                try:
+                    sender_alias = await get_alias(self._redis, msg.source_user_id)
+                except Exception as e:
+                    logger.debug("Failed to resolve alias for user %d: %s", msg.source_user_id, e)
+
             # Send
             result = await send_single(
                 self._bot, msg, task.dest_chat_id, signature,
                 reply_to_message_id=task.reply_to_message_id,
+                sender_alias=sender_alias,
             )
 
             # Log success
@@ -286,6 +296,7 @@ class Distributor:
                 log = SendLog(
                     source_chat_id=msg.source_chat_id,
                     source_message_id=msg.source_message_id,
+                    source_user_id=msg.source_user_id,
                     dest_chat_id=dest_chat_id,
                     dest_message_id=dest_message_id,
                 )

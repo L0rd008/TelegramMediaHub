@@ -1,4 +1,4 @@
-"""Tests for reply threading (SendLogRepo) and mute/unmute command gating."""
+"""Tests for reply threading (SendLogRepo) and broadcast command gating."""
 
 from __future__ import annotations
 

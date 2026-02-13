@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import datetime, timezone
 
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
@@ -10,10 +12,18 @@ from aiogram.types import Message
 
 from bot.config import settings
 from bot.db.engine import async_session
+from bot.db.repositories.alias_repo import AliasRepo
 from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.config_repo import ConfigRepo
+from bot.db.repositories.restriction_repo import RestrictionRepo
+from bot.db.repositories.send_log_repo import SendLogRepo
 from bot.db.repositories.subscription_repo import SubscriptionRepo
 from bot.services.distributor import get_distributor
+from bot.services.moderation import (
+    format_duration,
+    invalidate_restriction_cache,
+    parse_duration,
+)
 from bot.services.subscription import PLANS, invalidate_cache
 
 logger = logging.getLogger(__name__)
@@ -26,6 +36,38 @@ def _is_admin(user_id: int | None) -> bool:
     if user_id is None:
         return False
     return user_id in settings.admin_ids
+
+
+async def _resolve_target_user(
+    message: Message, args: str | None, bot_id: int
+) -> int | None:
+    """Resolve a user ID from either a reply or command arguments.
+
+    Priority:
+    1. If reply to non-bot message → reply.from_user.id
+    2. If reply to bot message → reverse lookup send_log for source_user_id
+    3. If args provided → parse first token as int
+    """
+    reply = message.reply_to_message
+    if reply:
+        if reply.from_user and reply.from_user.id != bot_id:
+            return reply.from_user.id
+        if reply.from_user and reply.from_user.id == bot_id:
+            async with async_session() as session:
+                repo = SendLogRepo(session)
+                user_id = await repo.get_source_user_id(
+                    message.chat.id, reply.message_id
+                )
+                return user_id
+
+    if args:
+        first_token = args.strip().split()[0]
+        try:
+            return int(first_token)
+        except ValueError:
+            return None
+
+    return None
 
 
 # ── /status ───────────────────────────────────────────────────────────
@@ -232,26 +274,22 @@ async def cmd_edits(message: Message, command: CommandObject) -> None:
 
 @admin_router.message(Command("remove"))
 async def cmd_remove(message: Message, command: CommandObject) -> None:
-    """Remove a chat by ID. Usage: /remove <chat_id>"""
+    """Remove a chat by ID or reply. Usage: /remove <chat_id> or reply to a message."""
     if not _is_admin(message.from_user and message.from_user.id):
         return
 
-    chat_id_str = (command.args or "").strip()
-    if not chat_id_str:
-        await message.answer("Usage: /remove <chat_id>")
-        return
+    bot_info = await message.bot.get_me()
+    target = await _resolve_target_user(message, command.args, bot_info.id)
 
-    try:
-        chat_id = int(chat_id_str)
-    except ValueError:
-        await message.answer("Invalid chat ID. Must be a number.")
+    if target is None:
+        await message.answer("Usage: /remove &lt;chat_id&gt; or reply to a user's message.")
         return
 
     async with async_session() as session:
         repo = ChatRepo(session)
-        await repo.deactivate_chat(chat_id)
+        await repo.deactivate_chat(target)
 
-    await message.answer(f"✅ Chat <code>{chat_id}</code> removed.")
+    await message.answer(f"✅ Chat <code>{target}</code> removed.")
 
 
 # ── /grant ───────────────────────────────────────────────────────────
@@ -259,26 +297,40 @@ async def cmd_remove(message: Message, command: CommandObject) -> None:
 
 @admin_router.message(Command("grant"))
 async def cmd_grant(message: Message, command: CommandObject) -> None:
-    """Grant a subscription to a chat. Usage: /grant <chat_id> <plan>"""
+    """Grant a subscription. Usage: /grant <chat_id> <plan>, /grant <plan> (reply), or reply + /grant <plan>."""
     if not _is_admin(message.from_user and message.from_user.id):
         return
 
-    args = (command.args or "").strip().split()
-    if len(args) != 2:
+    args_raw = (command.args or "").strip().split()
+    bot_info = await message.bot.get_me()
+
+    # Determine chat_id and plan_key based on reply or args
+    chat_id: int | None = None
+    plan_key: str | None = None
+
+    if message.reply_to_message:
+        # Reply mode: /grant <plan>
+        target = await _resolve_target_user(message, None, bot_info.id)
+        chat_id = target
+        if args_raw:
+            plan_key = args_raw[0].lower()
+    elif len(args_raw) == 2:
+        # Standard mode: /grant <chat_id> <plan>
+        try:
+            chat_id = int(args_raw[0])
+        except ValueError:
+            await message.answer("Invalid chat ID. Must be a number.")
+            return
+        plan_key = args_raw[1].lower()
+
+    if chat_id is None or plan_key is None:
         plans_list = ", ".join(PLANS.keys())
         await message.answer(
-            f"Usage: /grant &lt;chat_id&gt; &lt;plan&gt;\n"
+            f"Usage: /grant &lt;chat_id&gt; &lt;plan&gt; or reply + /grant &lt;plan&gt;\n"
             f"Plans: {plans_list}"
         )
         return
 
-    try:
-        chat_id = int(args[0])
-    except ValueError:
-        await message.answer("Invalid chat ID. Must be a number.")
-        return
-
-    plan_key = args[1].lower()
     plan = PLANS.get(plan_key)
     if plan is None:
         await message.answer(
@@ -316,33 +368,259 @@ async def cmd_grant(message: Message, command: CommandObject) -> None:
 
 @admin_router.message(Command("revoke"))
 async def cmd_revoke(message: Message, command: CommandObject) -> None:
-    """Revoke active subscriptions for a chat. Usage: /revoke <chat_id>"""
+    """Revoke active subscriptions. Usage: /revoke <chat_id> or reply to a message."""
     if not _is_admin(message.from_user and message.from_user.id):
         return
 
-    chat_id_str = (command.args or "").strip()
-    if not chat_id_str:
-        await message.answer("Usage: /revoke &lt;chat_id&gt;")
-        return
+    bot_info = await message.bot.get_me()
+    target = await _resolve_target_user(message, command.args, bot_info.id)
 
-    try:
-        chat_id = int(chat_id_str)
-    except ValueError:
-        await message.answer("Invalid chat ID. Must be a number.")
+    if target is None:
+        await message.answer("Usage: /revoke &lt;chat_id&gt; or reply to a user's message.")
         return
 
     async with async_session() as session:
         repo = SubscriptionRepo(session)
-        revoked = await repo.revoke_subscription(chat_id)
+        revoked = await repo.revoke_subscription(target)
 
     if revoked:
-        # Invalidate cache
         distributor = get_distributor()
-        await invalidate_cache(distributor._redis, chat_id)
+        await invalidate_cache(distributor._redis, target)
         await message.answer(
-            f"✅ Subscriptions revoked for chat <code>{chat_id}</code>."
+            f"✅ Subscriptions revoked for chat <code>{target}</code>."
         )
     else:
         await message.answer(
-            f"No active subscriptions found for chat <code>{chat_id}</code>."
+            f"No active subscriptions found for chat <code>{target}</code>."
         )
+
+
+# ── /mute (admin moderation) ────────────────────────────────────────
+
+
+@admin_router.message(Command("mute"))
+async def cmd_mute(message: Message, command: CommandObject) -> None:
+    """Mute a user temporarily. Usage: /mute <user_id> <duration> or reply + /mute <duration>.
+
+    Duration: 30m, 2h, 7d, 1d12h, etc.
+    """
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    bot_info = await message.bot.get_me()
+    args_raw = (command.args or "").strip().split()
+
+    # Parse target and duration
+    target: int | None = None
+    duration_str: str | None = None
+
+    if message.reply_to_message:
+        target = await _resolve_target_user(message, None, bot_info.id)
+        duration_str = args_raw[0] if args_raw else None
+    elif len(args_raw) >= 2:
+        try:
+            target = int(args_raw[0])
+        except ValueError:
+            await message.answer("Invalid user ID.")
+            return
+        duration_str = args_raw[1]
+
+    if target is None or duration_str is None:
+        await message.answer(
+            "Usage: /mute &lt;user_id&gt; &lt;duration&gt;\n"
+            "Or reply to a message + /mute &lt;duration&gt;\n"
+            "Duration: 30m, 2h, 7d, 1d12h"
+        )
+        return
+
+    td = parse_duration(duration_str)
+    if td is None:
+        await message.answer("Invalid duration. Examples: 30m, 2h, 7d, 1d12h")
+        return
+
+    expires = datetime.now(timezone.utc) + td
+    admin_id = message.from_user.id if message.from_user else 0
+
+    async with async_session() as session:
+        repo = RestrictionRepo(session)
+        await repo.create_restriction(
+            user_id=target,
+            restriction_type="mute",
+            restricted_by=admin_id,
+            expires_at=expires,
+        )
+
+    distributor = get_distributor()
+    await invalidate_restriction_cache(distributor._redis, target)
+
+    await message.answer(
+        f"🔇 User <code>{target}</code> muted for <b>{format_duration(td)}</b>.\n"
+        f"Expires: <b>{expires.strftime('%d %b %Y %H:%M')} UTC</b>"
+    )
+
+
+# ── /unmute ──────────────────────────────────────────────────────────
+
+
+@admin_router.message(Command("unmute"))
+async def cmd_unmute(message: Message, command: CommandObject) -> None:
+    """Unmute a user. Usage: /unmute <user_id> or reply to a message."""
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    bot_info = await message.bot.get_me()
+    target = await _resolve_target_user(message, command.args, bot_info.id)
+
+    if target is None:
+        await message.answer("Usage: /unmute &lt;user_id&gt; or reply to a user's message.")
+        return
+
+    async with async_session() as session:
+        repo = RestrictionRepo(session)
+        removed = await repo.remove_restriction(target, "mute")
+
+    if removed:
+        distributor = get_distributor()
+        await invalidate_restriction_cache(distributor._redis, target)
+        await message.answer(f"🔊 User <code>{target}</code> unmuted.")
+    else:
+        await message.answer(f"User <code>{target}</code> is not muted.")
+
+
+# ── /ban ─────────────────────────────────────────────────────────────
+
+
+@admin_router.message(Command("ban"))
+async def cmd_ban(message: Message, command: CommandObject) -> None:
+    """Permanently ban a user. Usage: /ban <user_id> or reply to a message."""
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    bot_info = await message.bot.get_me()
+    target = await _resolve_target_user(message, command.args, bot_info.id)
+
+    if target is None:
+        await message.answer("Usage: /ban &lt;user_id&gt; or reply to a user's message.")
+        return
+
+    admin_id = message.from_user.id if message.from_user else 0
+
+    async with async_session() as session:
+        repo = RestrictionRepo(session)
+        await repo.create_restriction(
+            user_id=target,
+            restriction_type="ban",
+            restricted_by=admin_id,
+            expires_at=None,  # Permanent
+        )
+
+    distributor = get_distributor()
+    await invalidate_restriction_cache(distributor._redis, target)
+
+    # Fire ban cleanup (delete redistributed messages) as a background task
+    asyncio.create_task(_ban_cleanup(distributor._bot, target))
+
+    await message.answer(
+        f"⛔ User <code>{target}</code> permanently banned.\n"
+        "Their redistributed messages are being deleted."
+    )
+
+
+async def _ban_cleanup(bot, user_id: int) -> None:
+    """Background task: delete all redistributed messages from a banned user."""
+    try:
+        async with async_session() as session:
+            repo = SendLogRepo(session)
+            messages = await repo.get_dest_messages_by_user(user_id)
+
+        deleted = 0
+        for chat_id, msg_id in messages:
+            try:
+                await bot.delete_message(chat_id, msg_id)
+                deleted += 1
+            except Exception:
+                pass  # Message may already be deleted or too old
+            await asyncio.sleep(0.05)  # Gentle rate limiting
+
+        logger.info(
+            "Ban cleanup for user %d: deleted %d / %d messages.",
+            user_id, deleted, len(messages),
+        )
+    except Exception as e:
+        logger.error("Ban cleanup error for user %d: %s", user_id, e)
+
+
+# ── /unban ───────────────────────────────────────────────────────────
+
+
+@admin_router.message(Command("unban"))
+async def cmd_unban(message: Message, command: CommandObject) -> None:
+    """Unban a user. Usage: /unban <user_id> or reply to a message."""
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    bot_info = await message.bot.get_me()
+    target = await _resolve_target_user(message, command.args, bot_info.id)
+
+    if target is None:
+        await message.answer("Usage: /unban &lt;user_id&gt; or reply to a user's message.")
+        return
+
+    async with async_session() as session:
+        repo = RestrictionRepo(session)
+        removed = await repo.remove_restriction(target, "ban")
+
+    if removed:
+        distributor = get_distributor()
+        await invalidate_restriction_cache(distributor._redis, target)
+        await message.answer(f"✅ User <code>{target}</code> unbanned.")
+    else:
+        await message.answer(f"User <code>{target}</code> is not banned.")
+
+
+# ── /whois ───────────────────────────────────────────────────────────
+
+
+@admin_router.message(Command("whois"))
+async def cmd_whois(message: Message, command: CommandObject) -> None:
+    """Look up a user by their alias. Usage: /whois <alias>"""
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    alias = (command.args or "").strip().lower()
+    if not alias:
+        await message.answer("Usage: /whois &lt;alias&gt;  (e.g. /whois u-a3x7k2)")
+        return
+
+    # Strip brackets if provided
+    alias = alias.strip("[]")
+
+    async with async_session() as session:
+        alias_repo = AliasRepo(session)
+        user_id = await alias_repo.lookup_by_alias(alias)
+
+    if user_id is None:
+        await message.answer(f"No user found for alias <code>{alias}</code>.")
+        return
+
+    # Check restrictions
+    async with async_session() as session:
+        res_repo = RestrictionRepo(session)
+        restriction = await res_repo.get_active_restriction(user_id)
+
+    status = "None"
+    if restriction:
+        rtype = restriction.restriction_type.capitalize()
+        if restriction.expires_at:
+            exp = restriction.expires_at.strftime("%d %b %Y %H:%M UTC")
+            status = f"{rtype} (until {exp})"
+        else:
+            status = f"{rtype} (permanent)"
+
+    lines = [
+        f"🔍 <b>Alias Lookup: <code>{alias}</code></b>",
+        "",
+        f"User ID: <code>{user_id}</code>",
+        f"Restriction: {status}",
+    ]
+    await message.answer("\n".join(lines))

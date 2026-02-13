@@ -1,4 +1,4 @@
-"""SendLog model – tracks source→dest message mapping for edit support."""
+"""SendLog model – tracks source→dest message mapping for edits, reply threading, and moderation."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ class SendLog(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     source_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     dest_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     dest_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sent_at: Mapped[datetime] = mapped_column(
@@ -25,10 +26,12 @@ class SendLog(Base):
     __table_args__ = (
         Index("idx_send_log_source", "source_chat_id", "source_message_id"),
         Index("idx_send_log_dest", "dest_chat_id", "dest_message_id"),
+        Index("idx_send_log_user", "source_user_id"),
     )
 
     def __repr__(self) -> str:
         return (
             f"<SendLog src=({self.source_chat_id},{self.source_message_id}) "
+            f"user={self.source_user_id} "
             f"dest=({self.dest_chat_id},{self.dest_message_id})>"
         )

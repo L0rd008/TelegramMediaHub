@@ -1,4 +1,4 @@
-"""Start/stop/selfsend/mute/unmute handlers for all users."""
+"""Start/stop/selfsend/broadcast handlers for all users."""
 
 from __future__ import annotations
 
@@ -42,12 +42,12 @@ async def cmd_start(message: Message) -> None:
         "<b>What you get:</b>\n"
         "• Content synced across all your chats\n"
         "• Reply threading — replies follow conversations everywhere\n"
-        "• Broadcast control — pause/resume what you send and receive\n\n"
+        "• Broadcast control — pause/resume what you send and receive\n"
+        "• Sender aliases — identify who sent what without exposing identities\n\n"
         "<b>Commands:</b>\n"
         "/stop — Unregister this chat\n"
         "/selfsend on|off — Toggle self-send\n"
-        "/mute in|out — Pause incoming/outgoing broadcasts\n"
-        "/unmute in|out — Resume incoming/outgoing broadcasts\n"
+        "/broadcast off|on in|out — Pause/resume broadcasts\n"
         "/subscribe — View premium plans\n"
         "/plan — Check your subscription status",
         reply_markup=build_subscribe_button(),
@@ -88,17 +88,22 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
     await message.answer(f"Self-send {status} for this chat.")
 
 
-@start_router.message(Command("mute"))
-async def cmd_mute(message: Message, command: CommandObject) -> None:
-    """Pause broadcasting: /mute out (stop sending) or /mute in (stop receiving)."""
-    args = (command.args or "").strip().lower()
-    if args not in ("in", "out"):
+@start_router.message(Command("broadcast"))
+async def cmd_broadcast(message: Message, command: CommandObject) -> None:
+    """Control broadcast direction. Usage: /broadcast off|on in|out."""
+    args = (command.args or "").strip().lower().split()
+    if len(args) != 2 or args[0] not in ("off", "on") or args[1] not in ("in", "out"):
         await message.answer(
             "<b>Usage:</b>\n"
-            "/mute out — Pause sending your content to others\n"
-            "/mute in  — Pause receiving content from others"
+            "/broadcast off out — Pause sending your content to others\n"
+            "/broadcast on out  — Resume sending your content to others\n"
+            "/broadcast off in  — Pause receiving content from others\n"
+            "/broadcast on in   — Resume receiving content from others"
         )
         return
+
+    action, direction = args[0], args[1]
+    enabled = action == "on"
 
     # Premium gating
     redis = _get_redis()
@@ -123,69 +128,32 @@ async def cmd_mute(message: Message, command: CommandObject) -> None:
 
     async with async_session() as session:
         repo = ChatRepo(session)
-        if args == "out":
-            await repo.toggle_source(message.chat.id, False)
-            await message.answer(
-                "🔇 <b>Outgoing broadcast paused.</b>\n"
-                "Content from this chat will no longer be sent to others.\n"
-                "Use /unmute out to resume."
-            )
-        else:
-            await repo.toggle_destination(message.chat.id, False)
-            await message.answer(
-                "🔇 <b>Incoming broadcast paused.</b>\n"
-                "This chat will no longer receive content from others.\n"
-                "Use /unmute in to resume."
-            )
-
-
-@start_router.message(Command("unmute"))
-async def cmd_unmute(message: Message, command: CommandObject) -> None:
-    """Resume broadcasting: /unmute out (resume sending) or /unmute in (resume receiving)."""
-    args = (command.args or "").strip().lower()
-    if args not in ("in", "out"):
-        await message.answer(
-            "<b>Usage:</b>\n"
-            "/unmute out — Resume sending your content to others\n"
-            "/unmute in  — Resume receiving content from others"
-        )
-        return
-
-    # Premium gating
-    redis = _get_redis()
-    if redis is None:
-        await message.answer("Service temporarily unavailable.")
-        return
-
-    async with async_session() as session:
-        chat_obj = await ChatRepo(session).get_chat(message.chat.id)
-    if chat_obj is None:
-        await message.answer("Please /start first to register this chat.")
-        return
-
-    if not await is_premium(redis, message.chat.id, chat_obj.registered_at):
-        await message.answer(
-            "🔒 <b>Broadcast control is a Premium feature.</b>\n\n"
-            "Upgrade to manage exactly what you send and receive.\n"
-            "Plans start at just <b>~36 ⭐/day</b>.",
-            reply_markup=build_subscribe_button(),
-        )
-        return
-
-    async with async_session() as session:
-        repo = ChatRepo(session)
-        if args == "out":
-            await repo.toggle_source(message.chat.id, True)
-            await message.answer(
-                "🔊 <b>Outgoing broadcast resumed.</b>\n"
-                "Content from this chat will be sent to others again."
-            )
-        else:
-            await repo.toggle_destination(message.chat.id, True)
-            await message.answer(
-                "🔊 <b>Incoming broadcast resumed.</b>\n"
-                "This chat will receive content from others again."
-            )
+        if direction == "out":
+            await repo.toggle_source(message.chat.id, enabled)
+            if enabled:
+                await message.answer(
+                    "🔊 <b>Outgoing broadcast resumed.</b>\n"
+                    "Content from this chat will be sent to others again."
+                )
+            else:
+                await message.answer(
+                    "🔇 <b>Outgoing broadcast paused.</b>\n"
+                    "Content from this chat will no longer be sent to others.\n"
+                    "Use /broadcast on out to resume."
+                )
+        else:  # "in"
+            await repo.toggle_destination(message.chat.id, enabled)
+            if enabled:
+                await message.answer(
+                    "🔊 <b>Incoming broadcast resumed.</b>\n"
+                    "This chat will receive content from others again."
+                )
+            else:
+                await message.answer(
+                    "🔇 <b>Incoming broadcast paused.</b>\n"
+                    "This chat will no longer receive content from others.\n"
+                    "Use /broadcast on in to resume."
+                )
 
 
 def _get_redis():

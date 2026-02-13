@@ -18,9 +18,16 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Graceful degradation** — uses `allow_sending_without_reply=True` so replies still send even if the target message was deleted or pruned from the 48-hour send_log window
 
 ### Broadcast Control
-- **Per-chat muting** — `/mute out` pauses outgoing content (stops this chat from broadcasting); `/mute in` pauses incoming content (stops receiving from others)
-- **Resume anytime** — `/unmute out` and `/unmute in` to resume
+- **Per-chat control** — `/broadcast off out` pauses outgoing content; `/broadcast off in` pauses incoming content
+- **Resume anytime** — `/broadcast on out` and `/broadcast on in` to resume
 - **Premium-gated** — available during the free trial and for premium subscribers; paywalled after trial expiry
+
+### Moderation & Aliases
+- **Sender aliases** — each user gets a persistent random pseudonym (e.g. `u-a3x7k2`) appended to redistributed messages, allowing admins to identify senders without exposing real identities
+- **Mute (admin)** — `/mute <user_id|reply> <duration>` silences a user for a specified time (30m, 2h, 7d, etc.)
+- **Ban (admin)** — `/ban <user_id|reply>` permanently blocks a user and deletes all their redistributed messages
+- **Reply-based targeting** — all admin commands that accept a user ID also work by replying to a message
+- **Alias lookup** — `/whois <alias>` reveals the user behind a pseudonym and shows any active restrictions
 
 ### Deduplication
 - Content fingerprinting using `file_unique_id` (media) or SHA-256 (text)
@@ -119,8 +126,7 @@ python -m bot
 | `/start` | Register this chat for sending and receiving content |
 | `/stop` | Unregister this chat |
 | `/selfsend on\|off` | Toggle whether you receive your own content back |
-| `/mute in\|out` | Pause incoming or outgoing broadcasts (premium) |
-| `/unmute in\|out` | Resume incoming or outgoing broadcasts (premium) |
+| `/broadcast off\|on in\|out` | Pause/resume incoming or outgoing broadcasts (premium) |
 | `/subscribe [chat_id]` | View premium plans and purchase via Telegram Stars |
 | `/plan` | Show current subscription/trial status and broadcast state |
 
@@ -136,9 +142,14 @@ python -m bot
 | `/pause` | Pause all content distribution |
 | `/resume` | Resume distribution |
 | `/edits off\|resend` | Set edit redistribution mode |
-| `/remove <chat_id>` | Forcibly deactivate a chat |
-| `/grant <chat_id> <plan>` | Grant a free subscription (week/month/year) |
-| `/revoke <chat_id>` | Revoke active subscriptions for a chat |
+| `/remove <chat_id\|reply>` | Forcibly deactivate a chat |
+| `/grant <chat_id> <plan>` or reply + `/grant <plan>` | Grant a free subscription (week/month/year) |
+| `/revoke <chat_id\|reply>` | Revoke active subscriptions for a chat |
+| `/mute <user_id\|reply> <duration>` | Mute a user for a specified duration (e.g. 30m, 2h, 7d) |
+| `/unmute <user_id\|reply>` | Remove a user's mute |
+| `/ban <user_id\|reply>` | Permanently ban a user and delete their redistributed messages |
+| `/unban <user_id\|reply>` | Remove a user's ban |
+| `/whois <alias>` | Look up a user by their alias (e.g. `/whois u-a3x7k2`) |
 
 ---
 
@@ -157,32 +168,38 @@ TelegramMediaHub/
 │   │   └── repositories/
 │   │       ├── chat_repo.py     # Chat CRUD (upsert, deactivate, migrate, toggle)
 │   │       ├── config_repo.py   # Key-value config CRUD
-│   │       ├── send_log_repo.py # Reverse lookup + dest resolution for reply threading
+│   │       ├── send_log_repo.py # Reverse lookup + dest resolution for reply threading + moderation
+│   │       ├── alias_repo.py    # User alias CRUD (get_or_create, lookup_by_alias)
+│   │       ├── restriction_repo.py  # Mute/ban restriction CRUD
 │   │       └── subscription_repo.py  # Subscription CRUD + trial queries
 │   │
 │   ├── models/
 │   │   ├── chat.py              # Chat registry (with partial index)
 │   │   ├── bot_config.py        # Key-value runtime config
-│   │   ├── send_log.py          # Source → dest mapping (edits + reply threading)
+│   │   ├── send_log.py          # Source → dest mapping (edits + reply threading + user tracking)
+│   │   ├── user_alias.py        # Persistent user pseudonyms
+│   │   ├── user_restriction.py  # Mute/ban records
 │   │   └── subscription.py      # Telegram Stars subscriptions
 │   │
 │   ├── services/
-│   │   ├── normalizer.py        # Message → NormalizedMessage (9 types)
+│   │   ├── normalizer.py        # Message → NormalizedMessage (9 types + source_user_id)
 │   │   ├── dedup.py             # Fingerprinting + Redis seen-cache
 │   │   ├── rate_limiter.py      # Token bucket + circuit breaker
-│   │   ├── sender.py            # NormalizedMessage → Bot API send* (with reply_parameters)
-│   │   ├── distributor.py       # Fan-out worker pool + paywall + reply resolve + SendLogCleaner
+│   │   ├── sender.py            # NormalizedMessage → Bot API send* (with reply_parameters + alias)
+│   │   ├── distributor.py       # Fan-out worker pool + paywall + reply resolve + alias + SendLogCleaner
 │   │   ├── media_group.py       # Album buffer + auto-flusher
 │   │   ├── signature.py         # Promotional signature appender
+│   │   ├── alias.py             # Sender alias service (cached Redis lookup + formatting)
+│   │   ├── moderation.py        # Restriction checks, duration parser, cache invalidation
 │   │   └── subscription.py      # Premium checks, nudges, trial reminders
 │   │
 │   ├── handlers/
 │   │   ├── membership.py        # my_chat_member auto-registration
-│   │   ├── start.py             # /start, /stop, /selfsend, /mute, /unmute
-│   │   ├── admin.py             # Admin-only commands
+│   │   ├── start.py             # /start, /stop, /selfsend, /broadcast
+│   │   ├── admin.py             # Admin commands + moderation (/mute, /ban, /whois, etc.)
 │   │   ├── subscription.py      # /subscribe, /plan, payment callbacks
 │   │   ├── edits.py             # Edit redistribution
-│   │   └── messages.py          # Content redistribution pipeline + reply detection
+│   │   └── messages.py          # Content redistribution pipeline + reply detection + restriction check
 │   │
 │   ├── middleware/
 │   │   ├── db_session_mw.py     # DB session injection
@@ -199,7 +216,8 @@ TelegramMediaHub/
 │   └── versions/
 │       ├── 001_initial.py       # chats, bot_config, send_log tables
 │       ├── 002_subscriptions.py # subscriptions table
-│       └── 003_send_log_dest_index.py  # Reverse-lookup index for reply threading
+│       ├── 003_send_log_dest_index.py  # Reverse-lookup index for reply threading
+│       └── 004_moderation.py    # user_aliases, user_restrictions + send_log.source_user_id
 │
 ├── docs/
 │   └── botfather-setup.md      # BotFather configuration guide
@@ -219,8 +237,10 @@ TelegramMediaHub/
 |---|---|
 | `chats` | Registry of all known chats (with `active`, `is_source`, `is_destination` flags) |
 | `bot_config` | Key-value store for runtime config (signature, pause state, edit mode) |
-| `send_log` | Tracks source→destination message mapping for edit support and reply threading (48 h retention, dual-indexed) |
+| `send_log` | Tracks source→destination message mapping for edits, reply threading, and moderation (48 h retention, triple-indexed) |
 | `subscriptions` | Telegram Stars payment records with plan, expiry, and charge ID |
+| `user_aliases` | Persistent random pseudonyms for sender identification (user_id → alias) |
+| `user_restrictions` | Mute/ban records with type, expiry, and admin who issued it |
 
 ---
 
@@ -236,6 +256,7 @@ Incoming message/channel_post
   ▼
 messages_router
   │
+  ├─ Restriction check: is_user_restricted? → drop if muted/banned
   ├─ normalize() → NormalizedMessage (or skip unsupported types)
   ├─ is_active_source? → drop if chat not registered
   ├─ media_group_id? → buffer in Redis (flush after 1s inactivity)
@@ -258,8 +279,9 @@ Worker pool (configurable, default 10)
   │
   ├─ Rate limiter: global token bucket + per-chat cooldown
   ├─ Build signature from config
-  ├─ send_single() → correct Bot API send* call (with reply_parameters)
-  ├─ Log to send_log
+  ├─ Resolve sender alias (cached in Redis)
+  ├─ send_single() → correct Bot API send* call (with reply_parameters + alias tag)
+  ├─ Log to send_log (with source_user_id)
   │
   └─ Error handling:
       ├─ 429 → sleep retry_after, re-enqueue

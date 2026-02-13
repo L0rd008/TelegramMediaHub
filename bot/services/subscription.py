@@ -155,7 +155,8 @@ def build_pricing_text() -> str:
         "<b>What's included:</b>",
         "  ✅ Receive content from <b>every</b> registered chat",
         "  ✅ Reply threading across all chats",
-        "  ✅ Broadcast control (<code>/mute</code> & <code>/unmute</code>)",
+        "  ✅ Broadcast control (<code>/broadcast</code>)",
+        "  ✅ Sender aliases — know who sent what",
         "",
         "Choose the plan that works for you:",
         "",
@@ -280,7 +281,8 @@ class TrialReminderTask:
             "After that, you'll lose:\n"
             "  • Content from other chats\n"
             "  • Reply threading\n"
-            "  • Broadcast control (/mute & /unmute)\n\n"
+            "  • Broadcast control (/broadcast)\n"
+            "  • Sender alias identification\n\n"
             "Keep everything for just <b>25 ⭐/day</b> with the monthly plan."
         )
         try:

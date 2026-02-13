@@ -39,7 +39,19 @@ async def on_channel_post(message: Message) -> None:
 
 
 async def _handle_content(message: Message) -> None:
-    """Common handler: normalize → source check → dedup → distribute/buffer."""
+    """Common handler: restriction check → normalize → source check → dedup → distribute/buffer."""
+    # 0. Check user restrictions (mute/ban) – drop early to save resources
+    user_id = message.from_user.id if message.from_user else None
+    if user_id:
+        try:
+            from bot.services.moderation import is_user_restricted
+            _dist = get_distributor()
+            if await is_user_restricted(_dist._redis, user_id):
+                logger.debug("Dropping message from restricted user %d", user_id)
+                return
+        except RuntimeError:
+            pass  # Distributor not initialized yet
+
     # 1. Normalize
     normalized = normalize(message)
     if normalized is None:
@@ -55,9 +67,6 @@ async def _handle_content(message: Message) -> None:
     bot = message.bot
     if bot is None:
         return
-
-    # Access redis from bot's data (set in app.py)
-    from aiogram import Dispatcher
 
     # Since we can't easily get dp from message context, use the singleton
     distributor = get_distributor()

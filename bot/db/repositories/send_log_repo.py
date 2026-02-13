@@ -1,4 +1,4 @@
-"""SendLog repository – lookups for reply threading."""
+"""SendLog repository – lookups for reply threading and moderation."""
 
 from __future__ import annotations
 
@@ -52,3 +52,33 @@ class SendLogRepo:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def get_source_user_id(
+        self, dest_chat_id: int, dest_message_id: int
+    ) -> int | None:
+        """Given a bot-sent message, return the original sender's user_id.
+
+        Used for reply-based admin targeting on redistributed messages.
+        """
+        result = await self._s.execute(
+            select(SendLog.source_user_id)
+            .where(
+                SendLog.dest_chat_id == dest_chat_id,
+                SendLog.dest_message_id == dest_message_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_dest_messages_by_user(
+        self, user_id: int
+    ) -> list[tuple[int, int]]:
+        """Return all (dest_chat_id, dest_message_id) pairs for a given source user.
+
+        Used for ban cleanup — delete all redistributed messages from a user.
+        """
+        result = await self._s.execute(
+            select(SendLog.dest_chat_id, SendLog.dest_message_id)
+            .where(SendLog.source_user_id == user_id)
+        )
+        return [(row.dest_chat_id, row.dest_message_id) for row in result.all()]

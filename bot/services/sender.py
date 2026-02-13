@@ -54,17 +54,34 @@ def _rebuild_entities(raw: list[dict[str, Any]] | None) -> list[MessageEntity] |
     return entities or None
 
 
+def _append_alias(content: str | None, alias_tag: str) -> str | None:
+    """Append the sender alias tag to text/caption if content exists."""
+    if content is None:
+        return None
+    return f"{content}\n\n{alias_tag}"
+
+
 async def send_single(
     bot: Bot,
     msg: NormalizedMessage,
     chat_id: int,
     signature: str | None,
     reply_to_message_id: int | None = None,
+    sender_alias: str | None = None,
 ) -> Message | None:
     """Send a single NormalizedMessage to *chat_id*. Returns the sent Message."""
 
-    caption = apply_signature(msg.caption, signature, CAPTION_MAX_LEN)
-    text = apply_signature(msg.text, signature, TEXT_MAX_LEN)
+    # Apply alias tag before signature (alias is part of the content)
+    alias_tag = ""
+    if sender_alias:
+        from bot.services.alias import format_alias_tag
+        alias_tag = format_alias_tag(sender_alias)
+
+    raw_text = _append_alias(msg.text, alias_tag) if alias_tag and msg.text else msg.text
+    raw_caption = _append_alias(msg.caption, alias_tag) if alias_tag and msg.caption else msg.caption
+
+    caption = apply_signature(raw_caption, signature, CAPTION_MAX_LEN)
+    text = apply_signature(raw_text, signature, TEXT_MAX_LEN)
     entities = _rebuild_entities(msg.entities)
     caption_entities = _rebuild_entities(msg.caption_entities)
 
@@ -177,6 +194,7 @@ async def send_single(
                 return await send_media_group(
                     bot, msg, chat_id, signature,
                     reply_to_message_id=reply_to_message_id,
+                    sender_alias=sender_alias,
                 )
 
             case _:
@@ -199,6 +217,7 @@ async def send_media_group(
     chat_id: int,
     signature: str | None,
     reply_to_message_id: int | None = None,
+    sender_alias: str | None = None,
 ) -> Message | None:
     """Send a media group (album) to *chat_id*.
 
@@ -216,17 +235,25 @@ async def send_media_group(
         return await send_single(
             bot, msg.group_items[0], chat_id, signature,
             reply_to_message_id=reply_to_message_id,
+            sender_alias=sender_alias,
         )
 
     # Group items by compatible types
     groups = _split_by_compatibility(msg.group_items)
 
+    # Prepare alias tag for first item caption
+    alias_tag = ""
+    if sender_alias:
+        from bot.services.alias import format_alias_tag
+        alias_tag = format_alias_tag(sender_alias)
+
     first_result = None
     for group in groups:
         input_media = []
         for i, item in enumerate(group):
-            # Only first item in the group gets caption + signature
-            cap = apply_signature(item.caption, signature, CAPTION_MAX_LEN) if i == 0 else (item.caption if i > 0 else None)
+            # Only first item in the group gets caption + alias + signature
+            raw_cap = _append_alias(item.caption, alias_tag) if (i == 0 and alias_tag and item.caption) else item.caption
+            cap = apply_signature(raw_cap, signature, CAPTION_MAX_LEN) if i == 0 else (item.caption if i > 0 else None)
             cap_entities = _rebuild_entities(item.caption_entities) if i == 0 else None
 
             match item.message_type:

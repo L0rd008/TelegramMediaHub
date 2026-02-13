@@ -120,7 +120,8 @@ async def cmd_plan(message: Message) -> None:
         "but these features are locked:",
         "  • Content from other chats",
         "  • Reply threading",
-        "  • Broadcast control (/mute & /unmute)",
+        "  • Broadcast control (/broadcast)",
+        "  • Sender alias identification",
         "",
         "Unlock everything for just <b>25 ⭐/day</b>.",
     ]

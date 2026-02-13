@@ -320,13 +320,14 @@ class SendLogCleaner:
             await asyncio.sleep(SEND_LOG_CLEANUP_INTERVAL)
 
     async def _cleanup(self) -> None:
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from sqlalchemy import delete
 
         from bot.models.send_log import SendLog
 
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=SEND_LOG_MAX_AGE_HOURS)
+        # Use naive UTC timestamp because send_log.sent_at is stored without tzinfo.
+        cutoff = datetime.utcnow() - timedelta(hours=SEND_LOG_MAX_AGE_HOURS)
         async with async_session() as session:
             result = await session.execute(
                 delete(SendLog).where(SendLog.sent_at < cutoff)

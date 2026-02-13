@@ -182,7 +182,7 @@ TelegramMediaHub/
 │   │   ├── admin.py             # Admin-only commands
 │   │   ├── subscription.py      # /subscribe, /plan, payment callbacks
 │   │   ├── edits.py             # Edit redistribution
-│   │   └── messages.py          # Content redistribution pipeline
+│   │   └── messages.py          # Content redistribution pipeline + reply detection
 │   │
 │   ├── middleware/
 │   │   ├── db_session_mw.py     # DB session injection
@@ -201,6 +201,8 @@ TelegramMediaHub/
 │       ├── 002_subscriptions.py # subscriptions table
 │       └── 003_send_log_dest_index.py  # Reverse-lookup index for reply threading
 │
+├── docs/
+│   └── botfather-setup.md      # BotFather configuration guide
 ├── alembic.ini
 ├── requirements.txt
 ├── Dockerfile
@@ -238,6 +240,7 @@ messages_router
   ├─ is_active_source? → drop if chat not registered
   ├─ media_group_id? → buffer in Redis (flush after 1s inactivity)
   ├─ is_duplicate? → drop if fingerprint seen in last 24h
+  ├─ Reply detection: is reply to bot message? → reverse lookup in send_log
   │
   ▼
 distributor.distribute()
@@ -247,14 +250,15 @@ distributor.distribute()
   ├─ For each destination:
   │   ├─ Skip self-send (unless allowed)
   │   ├─ Paywall check (trial/premium) → nudge if expired
-  │   └─ Enqueue SendTask
+  │   ├─ Reply resolve: find bot's message ID in this dest via send_log
+  │   └─ Enqueue SendTask (with reply_to_message_id if applicable)
   │
   ▼
 Worker pool (configurable, default 10)
   │
   ├─ Rate limiter: global token bucket + per-chat cooldown
   ├─ Build signature from config
-  ├─ send_single() → correct Bot API send* call
+  ├─ send_single() → correct Bot API send* call (with reply_parameters)
   ├─ Log to send_log
   │
   └─ Error handling:

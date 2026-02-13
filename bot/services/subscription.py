@@ -37,7 +37,7 @@ PLANS: dict[str, Plan] = {
     "month": Plan(
         key="month", label="1 Month", stars=750, days=30, badge="BEST VALUE"
     ),
-    "year": Plan(key="year", label="1 Year", stars=1000, days=365, badge=""),
+    "year": Plan(key="year", label="1 Year", stars=10000, days=365, badge=""),
 }
 
 

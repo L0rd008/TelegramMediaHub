@@ -69,9 +69,9 @@ async def on_my_chat_member(event: ChatMemberUpdated) -> None:
                 bot: Bot = event.bot  # type: ignore[assignment]
                 await bot.send_message(
                     chat.id,
-                    "✅ <b>Chat registered!</b>\n"
-                    "This chat will now receive and distribute content.\n"
-                    "Use /stop to unregister.",
+                    "<b>Connected!</b> This chat is now part of your network.\n\n"
+                    "Messages sent here will sync to your other chats, "
+                    "and vice versa. Tap /stop to disconnect.",
                 )
             except Exception:
                 pass  # Can't send to some chat types

@@ -35,7 +35,7 @@ class Plan:
 PLANS: dict[str, Plan] = {
     "week": Plan(key="week", label="1 Week", stars=250, days=7, badge=""),
     "month": Plan(
-        key="month", label="1 Month", stars=750, days=30, badge="BEST VALUE"
+        key="month", label="1 Month", stars=750, days=30, badge="Most popular"
     ),
     "year": Plan(key="year", label="1 Year", stars=10000, days=365, badge=""),
 }
@@ -150,27 +150,21 @@ def build_pricing_text() -> str:
     saving_vs_weekly = round((1 - monthly_daily / weekly_daily) * 100)
 
     lines = [
-        "<b>Unlock Premium — Full Access to All Content</b>",
+        "<b>Go Premium</b>",
         "",
-        "<b>What's included:</b>",
-        "  ✅ Receive content from <b>every</b> registered chat",
-        "  ✅ Reply threading across all chats",
-        "  ✅ Broadcast control (<code>/broadcast</code>)",
-        "  ✅ Sender aliases — know who sent what",
-        "",
-        "Choose the plan that works for you:",
+        "Get messages from every connected chat — not just your own.",
         "",
         f"  ⏱  <b>{week.label}</b> — {week.stars} ⭐",
-        f"      <i>~{weekly_daily:.0f} ⭐/day</i>",
+        f"      <i>~{weekly_daily:.0f} stars/day</i>",
         "",
-        f"  🔥 <b>{month.label}</b> — {month.stars} ⭐  ← <b>{month.badge}</b>",
-        f"      <i>~{monthly_daily:.0f} ⭐/day  •  Save {saving_vs_weekly}%</i>",
+        f"  🔥 <b>{month.label}</b> — {month.stars} ⭐  ← <b>Most popular</b>",
+        f"      <i>~{monthly_daily:.0f} stars/day · Best value</i>",
         "",
         f"  📅 <b>{year.label}</b> — {year.stars:,} ⭐",
-        "      <i>No renewals for a full year</i>",
+        "      <i>Set it and forget it</i>",
         "",
-        "After your trial ends, only self-to-self messages are free.",
-        "Premium unlocks <b>everything</b>.",
+        "Free members can still sync their own messages. "
+        "Premium opens up your whole network.",
     ]
     return "\n".join(lines)
 
@@ -186,7 +180,7 @@ def build_pricing_keyboard(target_chat_id: int) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
-                text=f"🔥 {PLANS['month'].label} — {PLANS['month'].stars} ⭐  BEST VALUE",
+                text=f"🔥 {PLANS['month'].label} — {PLANS['month'].stars} ⭐  Most popular",
                 callback_data=f"sub:month:{target_chat_id}",
             )
         ],
@@ -267,24 +261,28 @@ class TrialReminderTask:
 
     async def _send_single_reminder(self, chat_id: int, days_left: int) -> None:
         if days_left == 1:
-            urgency = "⚠️ <b>Last day!</b>"
-            time_text = "tomorrow"
+            text = (
+                "<b>Last day of free access.</b>\n\n"
+                "After today, messages from other chats will pause. "
+                "Your own messages keep flowing.\n\n"
+                "Keep everything connected — plans start at about "
+                "<b>1 star per hour</b>."
+            )
         elif days_left == 3:
-            urgency = "⏳"
-            time_text = f"in <b>{days_left} days</b>"
+            text = (
+                "Your free access ends in <b>3 days</b>.\n\n"
+                "After that, you'll still be able to sync your own messages. "
+                "To keep your full network connected, Premium starts at "
+                "<b>250 stars</b>."
+            )
         else:
-            urgency = "📢"
-            time_text = f"in <b>{days_left} days</b>"
-
-        text = (
-            f"{urgency} Your free trial ends {time_text}.\n\n"
-            "After that, you'll lose:\n"
-            "  • Content from other chats\n"
-            "  • Reply threading\n"
-            "  • Broadcast control (/broadcast)\n"
-            "  • Sender alias identification\n\n"
-            "Keep everything for just <b>25 ⭐/day</b> with the monthly plan."
-        )
+            text = (
+                f"Just a heads up — your free access wraps up in "
+                f"<b>{days_left} days</b>.\n\n"
+                "Everything still works right now. If you'd like to keep "
+                "getting messages from your full network after that, "
+                "the monthly plan is about <b>1 star per hour</b>."
+            )
         try:
             await self._bot.send_message(
                 chat_id,

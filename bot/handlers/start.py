@@ -49,16 +49,11 @@ async def cmd_start(message: Message) -> None:
 
     logger.info("Chat registered via /start: %d", chat.id)
     await message.answer(
-        "👋 <b>Welcome to TelegramMediaHub!</b>\n\n"
-        "This chat is now registered. Content sent here will be "
-        "distributed to all other registered chats, and vice versa.\n\n"
-        f"🎁 You have a <b>{settings.TRIAL_DAYS}-day free trial</b> with "
-        "full access to every feature — no payment needed to get started.\n\n"
-        "<b>What you get:</b>\n"
-        "• Content synced across all your chats\n"
-        "• Reply threading — replies follow conversations everywhere\n"
-        "• Broadcast control — pause/resume what you send and receive\n"
-        "• Sender aliases — identify who sent what without exposing identities",
+        "Hey! 👋 <b>This chat is now connected.</b>\n\n"
+        "Anything you send here will show up in your other connected "
+        "chats — and their messages will appear here. Everything looks "
+        "like an original message, never a forward.\n\n"
+        "You have full access to everything. Explore the options below.",
         reply_markup=build_main_menu(),
     )
 
@@ -67,8 +62,9 @@ async def cmd_start(message: Message) -> None:
 async def cmd_stop(message: Message) -> None:
     """Show confirmation before unregistering this chat."""
     await message.answer(
-        "⚠️ <b>Are you sure you want to unregister this chat?</b>\n\n"
-        "You will stop sending and receiving distributed content.",
+        "You're about to <b>disconnect</b> this chat.\n\n"
+        "It will stop sending and receiving synced messages. "
+        "You can always reconnect with /start.",
         reply_markup=build_stop_confirm(),
     )
 
@@ -85,10 +81,13 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
         if chat is None:
             await message.answer("Please /start first to register this chat.")
             return
-        status = "enabled ✅" if chat.allow_self_send else "disabled ❌"
+        status = "ON ✅" if chat.allow_self_send else "OFF"
         kb = build_selfsend_result(chat.allow_self_send)
         await message.answer(
-            f"🔄 Self-send is currently <b>{status}</b>", reply_markup=kb
+            f"🔄 <b>Echo is currently {status}</b>\n\n"
+            "When echo is on, messages you send here also come back "
+            "to this chat from your other connected chats.",
+            reply_markup=kb,
         )
         return
 
@@ -98,9 +97,9 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
         repo = ChatRepo(session)
         await repo.toggle_self_send(message.chat.id, enabled)
 
-    status = "enabled ✅" if enabled else "disabled ❌"
+    status = "ON ✅" if enabled else "OFF"
     kb = build_selfsend_result(enabled)
-    await message.answer(f"🔄 Self-send {status} for this chat.", reply_markup=kb)
+    await message.answer(f"🔄 Echo is now <b>{status}</b>", reply_markup=kb)
 
 
 @start_router.message(Command("broadcast"))
@@ -123,20 +122,20 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
 
         if not await is_premium(redis, message.chat.id, chat_obj.registered_at):
             await message.answer(
-                "🔒 <b>Broadcast control is a Premium feature.</b>\n\n"
-                "Upgrade to manage exactly what you send and receive.\n"
-                "Plans start at just <b>~36 ⭐/day</b>.",
+                "<b>Sync Control</b> is a Premium feature.\n\n"
+                "Choose exactly what this chat sends and receives. "
+                "Plans start at about <b>1 star per hour</b>.",
                 reply_markup=build_subscribe_button(),
             )
             return
 
-        out_status = "🔊 ON" if chat_obj.is_source else "🔇 PAUSED"
-        in_status = "🔊 ON" if chat_obj.is_destination else "🔇 PAUSED"
+        out_status = "ON" if chat_obj.is_source else "PAUSED"
+        in_status = "ON" if chat_obj.is_destination else "PAUSED"
         kb = build_broadcast_panel(chat_obj.is_source, chat_obj.is_destination)
         await message.answer(
-            f"📡 <b>Broadcast Control</b>\n\n"
-            f"Outgoing: <b>{out_status}</b>\n"
-            f"Incoming: <b>{in_status}</b>",
+            "<b>Sync Control</b>\n\n"
+            f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
+            f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
             reply_markup=kb,
         )
         return
@@ -158,9 +157,9 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
 
     if not await is_premium(redis, message.chat.id, chat_obj.registered_at):
         await message.answer(
-            "🔒 <b>Broadcast control is a Premium feature.</b>\n\n"
-            "Upgrade to manage exactly what you send and receive.\n"
-            "Plans start at just <b>~36 ⭐/day</b>.",
+            "<b>Sync Control</b> is a Premium feature.\n\n"
+            "Choose exactly what this chat sends and receives. "
+            "Plans start at about <b>1 star per hour</b>.",
             reply_markup=build_subscribe_button(),
         )
         return
@@ -176,13 +175,13 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
     async with async_session() as session:
         chat_obj = await ChatRepo(session).get_chat(message.chat.id)
 
-    out_status = "🔊 ON" if chat_obj.is_source else "🔇 PAUSED"
-    in_status = "🔊 ON" if chat_obj.is_destination else "🔇 PAUSED"
+    out_status = "ON" if chat_obj.is_source else "PAUSED"
+    in_status = "ON" if chat_obj.is_destination else "PAUSED"
     kb = build_broadcast_panel(chat_obj.is_source, chat_obj.is_destination)
     await message.answer(
-        f"📡 <b>Broadcast Control</b>\n\n"
-        f"Outgoing: <b>{out_status}</b>\n"
-        f"Incoming: <b>{in_status}</b>",
+        "<b>Sync Control</b>\n\n"
+        f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
+        f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
         reply_markup=kb,
     )
 
@@ -234,22 +233,22 @@ async def cmd_stats(message: Message) -> None:
         if redis:
             from bot.services.alias import get_alias
             alias = await get_alias(redis, user_id)
-            alias_text = f"\nAlias: <code>[{alias}]</code>"
+            alias_text = f"\nYour ID tag: <code>[{alias}]</code>"
 
     # Broadcast state
-    src = "🔊 ON" if chat.is_source else "🔇 Paused"
-    dst = "🔊 ON" if chat.is_destination else "🔇 Paused"
+    src = "ON" if chat.is_source else "Paused"
+    dst = "ON" if chat.is_destination else "Paused"
 
     # Plan one-liner
     if active_sub:
         remaining = (active_sub.expires_at - datetime.now(timezone.utc)).days
-        plan_line = f"⭐ Premium — {active_sub.plan.capitalize()} ({remaining}d left)"
+        plan_line = f"Premium — {active_sub.plan.capitalize()} ({remaining}d left)"
     else:
         trial_left = get_trial_days_remaining(chat.registered_at)
         if trial_left > 0:
-            plan_line = f"🆓 Free Trial ({trial_left}d left)"
+            plan_line = f"Full access ({trial_left}d left)"
         else:
-            plan_line = "🔒 Trial Expired"
+            plan_line = "Free access ended"
 
     # Missed messages (only meaningful if trial expired and no sub)
     missed_line = ""
@@ -259,20 +258,23 @@ async def cmd_stats(message: Message) -> None:
             from bot.services.subscription import get_missed_today
             missed = await get_missed_today(redis, chat_id)
             if missed > 0:
-                missed_line = f"\n⚠️ Missed today: <b>{missed:,}</b> messages"
+                missed_line = (
+                    f"\n\n{missed:,} new message{'s' if missed != 1 else ''} "
+                    "waiting in your network."
+                )
 
     lines = [
-        "📈 <b>Your Stats</b>",
+        "<b>Your Activity</b>",
         "",
         f"Chat: <b>{name}</b> ({chat.chat_type})",
-        f"Registered: {chat.registered_at.strftime('%d %b %Y')} ({days_active}d ago)"
+        f"Connected since: {chat.registered_at.strftime('%d %b %Y')} ({days_active}d ago)"
         f"{alias_text}",
         "",
-        "<b>Last 48h:</b>",
-        f"  Sent: <b>{sent_count:,}</b> messages",
+        "<b>Last 48 hours:</b>",
+        f"  Sent out: <b>{sent_count:,}</b> messages",
         f"  Received: <b>{recv_count:,}</b> messages",
         "",
-        f"Broadcast: Sending {src} · Receiving {dst}",
+        f"Sync: Sending {src} · Receiving {dst}",
         f"Plan: {plan_line}{missed_line}",
     ]
 
@@ -295,7 +297,6 @@ async def cmd_stats(message: Message) -> None:
             restrictions = await res_repo.count_active_restrictions()
 
         # Trial vs expired: active - premium = non-premium active chats
-        # Among those, we check trial status heuristically
         non_premium = total_active - premium_count
 
         # Type breakdown line
@@ -324,20 +325,20 @@ async def cmd_stats(message: Message) -> None:
             "",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             "",
-            "🌐 <b>Global Stats</b>",
+            "<b>Network Overview</b>",
             "",
-            f"Chats: <b>{total_active}</b> active",
+            f"Connected chats: <b>{total_active}</b>",
             f"  {type_line}",
-            f"  Sources: {source_count} | Destinations: {dest_count}",
+            f"  Sending: {source_count} | Receiving: {dest_count}",
             "",
-            f"Subscriptions: <b>{premium_count}</b> premium | {non_premium} free/trial",
+            f"Premium members: <b>{premium_count}</b> | Free: {non_premium}",
             f"  ({sub_line})",
             "",
-            "<b>Last 48h:</b>",
-            f"  Distributed: <b>{total_dist:,}</b> messages",
-            f"  Unique senders: <b>{unique_senders}</b>",
+            "<b>Last 48 hours:</b>",
+            f"  Messages synced: <b>{total_dist:,}</b>",
+            f"  Active senders: <b>{unique_senders}</b>",
             "",
-            f"Moderation: 🔇 Muted: {muted} | ⛔ Banned: {banned}",
+            f"Moderation: {muted} silenced · {banned} blocked",
             f"Queue: {queue_size}",
         ])
 

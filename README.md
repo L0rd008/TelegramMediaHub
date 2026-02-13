@@ -132,34 +132,34 @@ python -m bot
 
 | Command | Description |
 |---|---|
-| `/start` | Register this chat + show quick-action menu buttons |
-| `/stop` | Unregister this chat (shows confirmation buttons) |
-| `/selfsend [on\|off]` | Toggle self-send; no args shows toggle panel |
-| `/broadcast [off\|on in\|out]` | Control broadcasts; no args shows broadcast panel (premium) |
-| `/subscribe [chat_id]` | View premium plans and purchase via Telegram Stars |
-| `/plan` | Show subscription/trial status with contextual action buttons |
-| `/stats` | View chat stats (messages sent/received, alias, plan); admins see global stats too |
+| `/start` | Start syncing this chat |
+| `/stop` | Stop syncing this chat |
+| `/selfsend [on\|off]` | See your own messages echoed back |
+| `/broadcast [off\|on in\|out]` | Control what you send and receive (Premium) |
+| `/subscribe [chat_id]` | Go Premium |
+| `/plan` | Check your current plan |
+| `/stats` | See how your chat is doing |
 
 ### Admin Commands (restricted to `ADMIN_USER_IDS`)
 
 | Command | Description |
 |---|---|
-| `/status` | Bot status with action buttons (pause/resume, edits, signature, chat list) |
-| `/list [page]` | Paginated chat list with inline navigation buttons |
-| `/signature <text>` | Set promotional signature text |
-| `/signatureurl <url>` | Set signature as a URL |
-| `/signatureoff` | Disable signature |
-| `/pause` | Pause distribution (shows resume button) |
-| `/resume` | Resume distribution (shows pause button) |
-| `/edits [off\|resend]` | Set edit mode; no args shows toggle panel |
-| `/remove <chat_id\|reply>` | Deactivate a chat (also via chat list buttons) |
-| `/grant <chat_id> <plan>` or reply + `/grant <plan>` | Grant subscription (also via chat list plan picker buttons) |
-| `/revoke <chat_id\|reply>` | Revoke subscriptions (also via chat list buttons) |
-| `/mute <user_id\|reply> [duration]` | Mute a user; no duration shows preset buttons (30m/2h/1d/7d) |
-| `/unmute <user_id\|reply>` | Unmute (shows re-mute undo buttons) |
-| `/ban <user_id\|reply>` | Ban with confirmation button; executes cleanup on confirm |
-| `/unban <user_id\|reply>` | Unban (shows re-ban undo button) |
-| `/whois <alias>` | Look up user by alias with Mute/Ban action buttons |
+| `/status` | Dashboard |
+| `/list [page]` | Browse connected chats |
+| `/signature <text>` | Set a signature line |
+| `/signatureurl <url>` | Set a signature link |
+| `/signatureoff` | Remove signature |
+| `/pause` | Pause all syncing |
+| `/resume` | Resume syncing |
+| `/edits [off\|resend]` | Handle edited messages |
+| `/remove <chat_id\|reply>` | Disconnect a chat |
+| `/grant <chat_id> <plan>` or reply + `/grant <plan>` | Give someone Premium |
+| `/revoke <chat_id\|reply>` | Remove someone's Premium |
+| `/mute <user_id\|reply> [duration]` | Temporarily silence a user |
+| `/unmute <user_id\|reply>` | Unsilence a user |
+| `/ban <user_id\|reply>` | Permanently block a user |
+| `/unban <user_id\|reply>` | Unblock a user |
+| `/whois <alias>` | Look up who sent something |
 
 ---
 

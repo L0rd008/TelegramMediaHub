@@ -30,23 +30,21 @@ MediaHubDistBot
 > Set via: `/setdescription` → select your bot → paste the text below
 
 ```
-I redistribute content across your Telegram chats — as original messages, never forwards.
+Post once. It shows up everywhere — as if you sent it yourself.
 
-✅ All media types: photos, videos, GIFs, audio, docs, stickers
-✅ Albums stay intact
-✅ Reply threading — replies follow conversations across chats
-✅ Broadcast control — pause/resume what you send and receive
-✅ Sender aliases — identify who sent what
-✅ Moderation — mute and ban abusive senders
-✅ Duplicate detection — no spam
-✅ Privacy first — no forwarding metadata
+I sync your messages across all your Telegram chats, groups, and channels. Photos, videos, documents, stickers — everything arrives as an original message, not a forward.
 
-Add me to any group or channel, and I'll keep every registered chat in sync — automatically.
+What makes me different:
+— Your content looks native in every chat
+— Replies stay threaded across conversations
+— You control what goes where
+— Private — no one sees forwarding tags
+— Works in groups, channels, and private chats
 
-Free 30-day trial. Premium via Telegram Stars ⭐
+Just add me and tap /start. You get full access free for 30 days.
 ```
 
-*Characters: ~497 / 512*
+*Characters: ~451 / 512*
 
 ---
 
@@ -55,10 +53,10 @@ Free 30-day trial. Premium via Telegram Stars ⭐
 > Set via: `/setabouttext` → select your bot → paste the text below
 
 ```
-Syncs content across your Telegram chats as original messages — with reply threading and moderation. Free trial, then ⭐ Premium.
+Sync messages across all your chats — they arrive as originals, not forwards. Try free for 30 days.
 ```
 
-*Characters: ~113 / 120*
+*Characters: ~99 / 120*
 
 ---
 
@@ -67,29 +65,29 @@ Syncs content across your Telegram chats as original messages — with reply thr
 > Set via: `/setcommands` → select your bot → paste the block below exactly as-is
 
 ```
-start - Register this chat and show quick-action menu
-stop - Unregister this chat (with confirmation)
-selfsend - Toggle self-send or show toggle panel
-broadcast - Control broadcasts or show broadcast panel
-subscribe - View premium plans and subscribe
-plan - Show subscription status with action buttons
-stats - View your chat and usage statistics
-status - Bot status with action buttons (admin)
-list - Paginated chat list with navigation (admin)
-signature - Set signature text (admin)
-signatureurl - Set signature URL (admin)
-signatureoff - Disable signature (admin)
-pause - Pause distribution (admin)
-resume - Resume distribution (admin)
-edits - Set edit mode or show toggle panel (admin)
-remove - Remove a chat (admin)
-grant - Grant a subscription (admin)
-revoke - Revoke a subscription (admin)
-mute - Mute a user with preset durations (admin)
-unmute - Unmute a user (admin)
-ban - Ban a user with confirmation (admin)
-unban - Unban a user (admin)
-whois - Look up a user by alias (admin)
+start - Start syncing this chat
+stop - Stop syncing this chat
+selfsend - See your own messages echoed back
+broadcast - Control what you send and receive
+subscribe - Go Premium
+plan - Check your current plan
+stats - See how your chat is doing
+status - Dashboard (admin)
+list - Browse connected chats (admin)
+pause - Pause all syncing (admin)
+resume - Resume syncing (admin)
+edits - Handle edited messages (admin)
+signature - Set a signature line (admin)
+signatureurl - Set a signature link (admin)
+signatureoff - Remove signature (admin)
+remove - Disconnect a chat (admin)
+grant - Give someone Premium (admin)
+revoke - Remove someone's Premium (admin)
+mute - Temporarily silence a user (admin)
+unmute - Unsilence a user (admin)
+ban - Permanently block a user (admin)
+unban - Unblock a user (admin)
+whois - Look up who sent something (admin)
 ```
 
 ---

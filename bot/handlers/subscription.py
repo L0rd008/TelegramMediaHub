@@ -73,39 +73,31 @@ async def cmd_plan(message: Message) -> None:
 
     if active_sub:
         remaining = (active_sub.expires_at - active_sub.starts_at).days
-        source_status = "🔊 Sending" if chat.is_source else "🔇 Sending paused"
-        dest_status = "🔊 Receiving" if chat.is_destination else "🔇 Receiving paused"
+        src = "ON" if chat.is_source else "Paused"
+        dst = "ON" if chat.is_destination else "Paused"
         lines = [
-            "⭐ <b>Premium Active</b>",
+            "<b>You're a Premium member</b>",
             "",
             f"Plan: <b>{active_sub.plan.capitalize()}</b>",
-            f"Expires: <b>{active_sub.expires_at.strftime('%d %b %Y')}</b>",
-            f"({remaining} days remaining)",
+            f"Active until: <b>{active_sub.expires_at.strftime('%d %b %Y')}</b> ({remaining} days)",
             "",
-            f"<b>Broadcast:</b> {source_status} · {dest_status}",
+            f"Sync: Sending {src} · Receiving {dst}",
             "",
-            "You have full access to all content.",
+            "Everything is flowing. Enjoy.",
         ]
         await message.answer("\n".join(lines), reply_markup=build_plan_active_actions())
         return
-
-    # Build broadcast status (available during trial too)
-    source_status = "🔊 Sending" if chat.is_source else "🔇 Sending paused"
-    dest_status = "🔊 Receiving" if chat.is_destination else "🔇 Receiving paused"
-    broadcast_line = f"<b>Broadcast:</b> {source_status} · {dest_status}"
 
     # Check trial
     trial_left = get_trial_days_remaining(chat.registered_at)
     if trial_left > 0:
         lines = [
-            "🆓 <b>Free Trial Active</b>",
+            "<b>You have full access right now</b>",
             "",
-            f"Days remaining: <b>{trial_left}</b>",
+            f"<b>{trial_left}</b> days left to explore everything — messages "
+            "from all your connected chats, reply threading, sync control, and more.",
             "",
-            broadcast_line,
-            "",
-            "You currently have full access to all features.",
-            "After the trial, only self-to-self messages will be free.",
+            "No payment needed yet.",
         ]
         await message.answer(
             "\n".join(lines), reply_markup=build_plan_trial_actions()
@@ -114,16 +106,11 @@ async def cmd_plan(message: Message) -> None:
 
     # Expired
     lines = [
-        "🔒 <b>Trial Expired</b>",
+        "<b>Your free access has ended</b>",
         "",
-        "You can still send and receive your <b>own</b> messages,",
-        "but these features are locked:",
-        "  • Content from other chats",
-        "  • Reply threading",
-        "  • Broadcast control (/broadcast)",
-        "  • Sender alias identification",
-        "",
-        "Unlock everything for just <b>25 ⭐/day</b>.",
+        "Messages between your own chats still work. To get messages "
+        "from your whole network again, go Premium — it's about "
+        "<b>1 star per hour</b>.",
     ]
     await message.answer("\n".join(lines), reply_markup=build_subscribe_button())
 
@@ -261,16 +248,14 @@ async def on_successful_payment(message: Message) -> None:
     )
 
     lines = [
-        "🎉 <b>Payment Successful!</b>",
+        "<b>You're in. Welcome to Premium.</b>",
         "",
         f"Plan: <b>{plan.label}</b>",
         f"For: {target_label}",
         f"Active until: <b>{expires_str}</b>",
         "",
-        "You now have full access to all content from every",
-        "registered chat. Enjoy! ✨",
-        "",
-        "<i>Know someone who'd love this? Share the bot!</i>",
+        "Messages from your entire network will now flow into this chat. "
+        "Thank you for supporting the bot.",
     ]
     await message.answer("\n".join(lines))
 
@@ -280,13 +265,10 @@ async def on_successful_payment(message: Message) -> None:
             bot = message.bot
             if bot:
                 notify_lines = [
-                    "⭐ <b>Premium Activated!</b>",
+                    f"This chat just got upgraded to <b>Premium</b> ({plan.label}).",
                     "",
-                    f"A generous member subscribed this chat to the "
-                    f"<b>{plan.label}</b> plan.",
-                    f"Active until: <b>{expires_str}</b>",
-                    "",
-                    "All content from every registered chat will now be delivered here.",
+                    "Messages from all connected chats will now arrive here. "
+                    f"Active until <b>{expires_str}</b>.",
                 ]
                 await bot.send_message(target_chat_id, "\n".join(notify_lines))
         except Exception as e:

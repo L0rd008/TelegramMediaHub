@@ -129,34 +129,32 @@ async def cb_myplan(callback: CallbackQuery) -> None:
 
     if sub:
         remaining = (sub.expires_at - sub.starts_at).days
-        src = "🔊 Sending" if chat.is_source else "🔇 Sending paused"
-        dst = "🔊 Receiving" if chat.is_destination else "🔇 Receiving paused"
+        src = "ON" if chat.is_source else "Paused"
+        dst = "ON" if chat.is_destination else "Paused"
         text = (
-            "⭐ <b>Premium Active</b>\n\n"
+            "<b>You're a Premium member</b>\n\n"
             f"Plan: <b>{sub.plan.capitalize()}</b>\n"
-            f"Expires: <b>{sub.expires_at.strftime('%d %b %Y')}</b>\n"
-            f"({remaining} days remaining)\n\n"
-            f"<b>Broadcast:</b> {src} · {dst}"
+            f"Active until: <b>{sub.expires_at.strftime('%d %b %Y')}</b> "
+            f"({remaining} days)\n\n"
+            f"Sync: Sending {src} · Receiving {dst}"
         )
         kb = build_plan_active_actions()
     else:
         trial_left = get_trial_days_remaining(chat.registered_at)
         if trial_left > 0:
-            src = "🔊 Sending" if chat.is_source else "🔇 Sending paused"
-            dst = "🔊 Receiving" if chat.is_destination else "🔇 Receiving paused"
+            src = "ON" if chat.is_source else "Paused"
+            dst = "ON" if chat.is_destination else "Paused"
             text = (
-                "🆓 <b>Free Trial Active</b>\n\n"
-                f"Days remaining: <b>{trial_left}</b>\n\n"
-                f"<b>Broadcast:</b> {src} · {dst}\n\n"
-                "Full access to all features."
+                f"<b>Full access — {trial_left} days left</b>\n\n"
+                f"Sync: Sending {src} · Receiving {dst}\n\n"
+                "Enjoying it? Plans start at <b>250 stars</b>."
             )
             kb = build_plan_trial_actions()
         else:
             text = (
-                "🔒 <b>Trial Expired</b>\n\n"
-                "Unlock cross-chat content, reply threading,\n"
-                "broadcast control, and sender aliases\n"
-                "for just <b>25 ⭐/day</b>."
+                "<b>Your free access has ended</b>\n\n"
+                "Get messages from your full network again — "
+                "about <b>1 star per hour</b>."
             )
             kb = build_subscribe_button()
 
@@ -179,17 +177,17 @@ async def cb_selfsend(callback: CallbackQuery) -> None:
         repo = ChatRepo(session)
         await repo.toggle_self_send(chat_id, enabled)
 
-    status = "enabled ✅" if enabled else "disabled ❌"
+    status = "ON ✅" if enabled else "OFF"
     kb = build_selfsend_result(enabled)
     try:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"🔄 Self-send {status} for this chat.", reply_markup=kb
+            f"🔄 Echo is now <b>{status}</b>", reply_markup=kb
         )
     except Exception:
         await callback.message.answer(  # type: ignore[union-attr]
-            f"🔄 Self-send {status} for this chat.", reply_markup=kb
+            f"🔄 Echo is now <b>{status}</b>", reply_markup=kb
         )
-    await callback.answer(f"Self-send {status}")
+    await callback.answer(f"Echo {status}")
 
 
 # ── Broadcast control panel ─────────────────────────────────────────
@@ -214,9 +212,9 @@ async def cb_broadcast_panel(callback: CallbackQuery) -> None:
         from bot.services.subscription import build_subscribe_button
         try:
             await callback.message.edit_text(  # type: ignore[union-attr]
-                "🔒 <b>Broadcast control is a Premium feature.</b>\n\n"
-                "Upgrade to manage exactly what you send and receive.\n"
-                "Plans start at just <b>~36 ⭐/day</b>.",
+                "<b>Sync Control</b> is a Premium feature.\n\n"
+                "Choose exactly what this chat sends and receives. "
+                "Plans start at about <b>1 star per hour</b>.",
                 reply_markup=build_subscribe_button(),
             )
         except Exception:
@@ -224,14 +222,14 @@ async def cb_broadcast_panel(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
-    out_status = "🔊 ON" if chat.is_source else "🔇 PAUSED"
-    in_status = "🔊 ON" if chat.is_destination else "🔇 PAUSED"
+    out_status = "ON" if chat.is_source else "PAUSED"
+    in_status = "ON" if chat.is_destination else "PAUSED"
     kb = build_broadcast_panel(chat.is_source, chat.is_destination)
     try:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"📡 <b>Broadcast Control</b>\n\n"
-            f"Outgoing: <b>{out_status}</b>\n"
-            f"Incoming: <b>{in_status}</b>",
+            "<b>Sync Control</b>\n\n"
+            f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
+            f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
             reply_markup=kb,
         )
     except Exception:
@@ -273,19 +271,19 @@ async def cb_broadcast_toggle(callback: CallbackQuery) -> None:
     async with async_session() as session:
         chat = await ChatRepo(session).get_chat(chat_id)
 
-    out_status = "🔊 ON" if chat.is_source else "🔇 PAUSED"
-    in_status = "🔊 ON" if chat.is_destination else "🔇 PAUSED"
+    out_status = "ON" if chat.is_source else "PAUSED"
+    in_status = "ON" if chat.is_destination else "PAUSED"
     kb = build_broadcast_panel(chat.is_source, chat.is_destination)
     try:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"📡 <b>Broadcast Control</b>\n\n"
-            f"Outgoing: <b>{out_status}</b>\n"
-            f"Incoming: <b>{in_status}</b>",
+            "<b>Sync Control</b>\n\n"
+            f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
+            f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
             reply_markup=kb,
         )
     except Exception:
         pass
-    label = "Outgoing" if direction == "o" else "Incoming"
+    label = "Sending" if direction == "o" else "Receiving"
     state = "resumed" if enabled else "paused"
     await callback.answer(f"{label} {state}.")
 

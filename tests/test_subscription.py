@@ -33,10 +33,10 @@ def test_week_plan():
     assert PLANS["week"].days == 7
 
 
-def test_month_plan_is_best_value():
+def test_month_plan_is_most_popular():
     assert PLANS["month"].stars == 750
     assert PLANS["month"].days == 30
-    assert "BEST VALUE" in PLANS["month"].badge
+    assert "Most popular" in PLANS["month"].badge
 
 
 def test_year_plan():
@@ -192,23 +192,22 @@ def test_build_pricing_text_contains_plans():
     assert "250" in text
     assert "750" in text
     assert "10,000" in text
-    assert "BEST VALUE" in text
-    assert "Save" in text
+    assert "Most popular" in text
+    assert "Best value" in text
 
 
 def test_build_pricing_text_contains_features():
-    """Pricing text should list the new premium features."""
+    """Pricing text should describe the premium value proposition."""
     text = build_pricing_text()
-    assert "Reply threading" in text
-    assert "/broadcast" in text
-    assert "Broadcast control" in text
-    assert "Sender aliases" in text
+    assert "Go Premium" in text
+    assert "every connected chat" in text
+    assert "whole network" in text
 
 
-def test_build_pricing_text_yearly_no_per_day():
-    """Yearly plan should say 'No renewals for a full year' instead of per-day cost."""
+def test_build_pricing_text_yearly_set_and_forget():
+    """Yearly plan should say 'Set it and forget it' instead of per-day cost."""
     text = build_pricing_text()
-    assert "No renewals for a full year" in text
+    assert "Set it and forget it" in text
 
 
 def test_build_pricing_keyboard_has_three_buttons():

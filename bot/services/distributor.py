@@ -137,11 +137,10 @@ class Distributor:
 
         try:
             missed = await get_missed_today(self._redis, chat_id)
-            missed_text = f"<b>{missed} message{'s' if missed != 1 else ''}</b>"
             text = (
-                f"🔒 You missed {missed_text} from your network today.\n\n"
-                "Premium includes cross-chat content, reply threading, "
-                "broadcast control, and sender aliases — from just <b>25 ⭐/day</b>."
+                f"<b>{missed}</b> new message{'s' if missed != 1 else ''} "
+                "waiting in your network.\n\n"
+                "Go Premium to see everything — about <b>1 star per hour</b>."
             )
             await self._bot.send_message(
                 chat_id,

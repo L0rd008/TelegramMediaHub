@@ -16,6 +16,7 @@ from aiogram.types import (
 from bot.db.engine import async_session
 from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.subscription_repo import SubscriptionRepo
+from bot.services.keyboards import build_plan_active_actions, build_plan_trial_actions
 from bot.services.subscription import (
     PLANS,
     build_pricing_keyboard,
@@ -72,7 +73,6 @@ async def cmd_plan(message: Message) -> None:
 
     if active_sub:
         remaining = (active_sub.expires_at - active_sub.starts_at).days
-        # Build mute status lines
         source_status = "🔊 Sending" if chat.is_source else "🔇 Sending paused"
         dest_status = "🔊 Receiving" if chat.is_destination else "🔇 Receiving paused"
         lines = [
@@ -86,7 +86,7 @@ async def cmd_plan(message: Message) -> None:
             "",
             "You have full access to all content.",
         ]
-        await message.answer("\n".join(lines))
+        await message.answer("\n".join(lines), reply_markup=build_plan_active_actions())
         return
 
     # Build broadcast status (available during trial too)
@@ -108,7 +108,7 @@ async def cmd_plan(message: Message) -> None:
             "After the trial, only self-to-self messages will be free.",
         ]
         await message.answer(
-            "\n".join(lines), reply_markup=build_subscribe_button()
+            "\n".join(lines), reply_markup=build_plan_trial_actions()
         )
         return
 

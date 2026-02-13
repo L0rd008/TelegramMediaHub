@@ -11,6 +11,12 @@ from aiogram.types import Message
 from bot.config import settings
 from bot.db.engine import async_session
 from bot.db.repositories.chat_repo import ChatRepo
+from bot.services.keyboards import (
+    build_broadcast_panel,
+    build_main_menu,
+    build_selfsend_result,
+    build_stop_confirm,
+)
 from bot.services.subscription import build_subscribe_button, is_premium
 
 logger = logging.getLogger(__name__)
@@ -43,29 +49,18 @@ async def cmd_start(message: Message) -> None:
         "• Content synced across all your chats\n"
         "• Reply threading — replies follow conversations everywhere\n"
         "• Broadcast control — pause/resume what you send and receive\n"
-        "• Sender aliases — identify who sent what without exposing identities\n\n"
-        "<b>Commands:</b>\n"
-        "/stop — Unregister this chat\n"
-        "/selfsend on|off — Toggle self-send\n"
-        "/broadcast off|on in|out — Pause/resume broadcasts\n"
-        "/subscribe — View premium plans\n"
-        "/plan — Check your subscription status",
-        reply_markup=build_subscribe_button(),
+        "• Sender aliases — identify who sent what without exposing identities",
+        reply_markup=build_main_menu(),
     )
 
 
 @start_router.message(Command("stop"))
 async def cmd_stop(message: Message) -> None:
-    """Unregister this chat."""
-    async with async_session() as session:
-        repo = ChatRepo(session)
-        await repo.deactivate_chat(message.chat.id)
-
-    logger.info("Chat deactivated via /stop: %d", message.chat.id)
+    """Show confirmation before unregistering this chat."""
     await message.answer(
-        "🛑 <b>Chat unregistered.</b>\n"
-        "This chat will no longer send or receive distributed content.\n"
-        "Use /start to re-register."
+        "⚠️ <b>Are you sure you want to unregister this chat?</b>\n\n"
+        "You will stop sending and receiving distributed content.",
+        reply_markup=build_stop_confirm(),
     )
 
 
@@ -74,8 +69,18 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
     """Toggle self-send for this chat."""
     args = (command.args or "").strip().lower()
 
+    # No args → show button panel
     if args not in ("on", "off"):
-        await message.answer("Usage: /selfsend on|off")
+        async with async_session() as session:
+            chat = await ChatRepo(session).get_chat(message.chat.id)
+        if chat is None:
+            await message.answer("Please /start first to register this chat.")
+            return
+        status = "enabled ✅" if chat.allow_self_send else "disabled ❌"
+        kb = build_selfsend_result(chat.allow_self_send)
+        await message.answer(
+            f"🔄 Self-send is currently <b>{status}</b>", reply_markup=kb
+        )
         return
 
     enabled = args == "on"
@@ -85,24 +90,49 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
         await repo.toggle_self_send(message.chat.id, enabled)
 
     status = "enabled ✅" if enabled else "disabled ❌"
-    await message.answer(f"Self-send {status} for this chat.")
+    kb = build_selfsend_result(enabled)
+    await message.answer(f"🔄 Self-send {status} for this chat.", reply_markup=kb)
 
 
 @start_router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message, command: CommandObject) -> None:
-    """Control broadcast direction. Usage: /broadcast off|on in|out."""
-    args = (command.args or "").strip().lower().split()
-    if len(args) != 2 or args[0] not in ("off", "on") or args[1] not in ("in", "out"):
+    """Control broadcast direction. Usage: /broadcast off|on in|out, or no args for panel."""
+    raw_args = (command.args or "").strip().lower().split()
+
+    # No args → show button panel
+    if not raw_args or len(raw_args) != 2 or raw_args[0] not in ("off", "on") or raw_args[1] not in ("in", "out"):
+        redis = _get_redis()
+        if redis is None:
+            await message.answer("Service temporarily unavailable.")
+            return
+
+        async with async_session() as session:
+            chat_obj = await ChatRepo(session).get_chat(message.chat.id)
+        if chat_obj is None:
+            await message.answer("Please /start first to register this chat.")
+            return
+
+        if not await is_premium(redis, message.chat.id, chat_obj.registered_at):
+            await message.answer(
+                "🔒 <b>Broadcast control is a Premium feature.</b>\n\n"
+                "Upgrade to manage exactly what you send and receive.\n"
+                "Plans start at just <b>~36 ⭐/day</b>.",
+                reply_markup=build_subscribe_button(),
+            )
+            return
+
+        out_status = "🔊 ON" if chat_obj.is_source else "🔇 PAUSED"
+        in_status = "🔊 ON" if chat_obj.is_destination else "🔇 PAUSED"
+        kb = build_broadcast_panel(chat_obj.is_source, chat_obj.is_destination)
         await message.answer(
-            "<b>Usage:</b>\n"
-            "/broadcast off out — Pause sending your content to others\n"
-            "/broadcast on out  — Resume sending your content to others\n"
-            "/broadcast off in  — Pause receiving content from others\n"
-            "/broadcast on in   — Resume receiving content from others"
+            f"📡 <b>Broadcast Control</b>\n\n"
+            f"Outgoing: <b>{out_status}</b>\n"
+            f"Incoming: <b>{in_status}</b>",
+            reply_markup=kb,
         )
         return
 
-    action, direction = args[0], args[1]
+    action, direction = raw_args[0], raw_args[1]
     enabled = action == "on"
 
     # Premium gating
@@ -130,30 +160,22 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
         repo = ChatRepo(session)
         if direction == "out":
             await repo.toggle_source(message.chat.id, enabled)
-            if enabled:
-                await message.answer(
-                    "🔊 <b>Outgoing broadcast resumed.</b>\n"
-                    "Content from this chat will be sent to others again."
-                )
-            else:
-                await message.answer(
-                    "🔇 <b>Outgoing broadcast paused.</b>\n"
-                    "Content from this chat will no longer be sent to others.\n"
-                    "Use /broadcast on out to resume."
-                )
-        else:  # "in"
+        else:
             await repo.toggle_destination(message.chat.id, enabled)
-            if enabled:
-                await message.answer(
-                    "🔊 <b>Incoming broadcast resumed.</b>\n"
-                    "This chat will receive content from others again."
-                )
-            else:
-                await message.answer(
-                    "🔇 <b>Incoming broadcast paused.</b>\n"
-                    "This chat will no longer receive content from others.\n"
-                    "Use /broadcast on in to resume."
-                )
+
+    # Re-fetch and show panel with updated state
+    async with async_session() as session:
+        chat_obj = await ChatRepo(session).get_chat(message.chat.id)
+
+    out_status = "🔊 ON" if chat_obj.is_source else "🔇 PAUSED"
+    in_status = "🔊 ON" if chat_obj.is_destination else "🔇 PAUSED"
+    kb = build_broadcast_panel(chat_obj.is_source, chat_obj.is_destination)
+    await message.answer(
+        f"📡 <b>Broadcast Control</b>\n\n"
+        f"Outgoing: <b>{out_status}</b>\n"
+        f"Incoming: <b>{in_status}</b>",
+        reply_markup=kb,
+    )
 
 
 def _get_redis():

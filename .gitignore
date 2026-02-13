@@ -1,7 +1,9 @@
 problem-description.md
 telegram-bot-api.md
 docs/
+!docs/
 docs/operations-runbook.md
+!docs/botfather-setup.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

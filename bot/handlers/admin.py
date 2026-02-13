@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import math
 from datetime import datetime, timezone
 
 from aiogram import Router
@@ -16,9 +16,20 @@ from bot.db.repositories.alias_repo import AliasRepo
 from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.config_repo import ConfigRepo
 from bot.db.repositories.restriction_repo import RestrictionRepo
-from bot.db.repositories.send_log_repo import SendLogRepo
 from bot.db.repositories.subscription_repo import SubscriptionRepo
 from bot.services.distributor import get_distributor
+from bot.services.keyboards import (
+    build_ban_confirm,
+    build_chat_list_nav,
+    build_edits_panel,
+    build_moderation_actions,
+    build_mute_presets,
+    build_pause_feedback,
+    build_resume_feedback,
+    build_status_actions,
+    build_unban_undo,
+    build_unmute_undo,
+)
 from bot.services.moderation import (
     format_duration,
     invalidate_restriction_cache,
@@ -104,14 +115,11 @@ async def cmd_status(message: Message) -> None:
         f"Queue size: <b>{distributor.queue_size}</b>",
         f"Paused: <b>{'Yes ⏸️' if paused else 'No ▶️'}</b>",
         f"Edit mode: <b>{edit_mode}</b>",
-        "",
-        "<b>Signature:</b>",
-        f"  Enabled: {sig_enabled}",
-        f"  Text: {sig_text or '(none)'}",
-        f"  URL: {sig_url or '(none)'}",
+        f"Signature: <b>{'ON' if sig_enabled else 'OFF'}</b>",
     ]
 
-    await message.answer("\n".join(lines))
+    kb = build_status_actions(paused, edit_mode, sig_enabled)
+    await message.answer("\n".join(lines), reply_markup=kb)
 
 
 # ── /list ─────────────────────────────────────────────────────────────
@@ -139,7 +147,10 @@ async def cmd_list(message: Message, command: CommandObject) -> None:
         await message.answer("No active chats.")
         return
 
-    lines = [f"📋 <b>Active Chats</b> (page {page + 1}, {total} total)\n"]
+    total_pages = max(1, math.ceil(total / 20))
+    display_page = page + 1
+
+    lines = [f"📋 <b>Active Chats</b> (page {display_page}/{total_pages}, {total} total)\n"]
     for c in chats:
         name = c.title or c.username or str(c.chat_id)
         flags = []
@@ -149,9 +160,10 @@ async def cmd_list(message: Message, command: CommandObject) -> None:
             flags.append("📥")
         if c.allow_self_send:
             flags.append("🔄")
-        lines.append(f"• <code>{c.chat_id}</code> {name} ({c.chat_type}) {''.join(flags)}")
+        lines.append(f"• <code>{c.chat_id}</code> {name} {''.join(flags)}")
 
-    await message.answer("\n".join(lines))
+    kb = build_chat_list_nav(display_page, total_pages)
+    await message.answer("\n".join(lines), reply_markup=kb)
 
 
 # ── /signature ────────────────────────────────────────────────────────
@@ -229,7 +241,10 @@ async def cmd_pause(message: Message) -> None:
         repo = ConfigRepo(session)
         await repo.set_value("paused", "true")
 
-    await message.answer("⏸️ Distribution paused. Use /resume to continue.")
+    await message.answer(
+        "⏸️ <b>Distribution paused.</b>",
+        reply_markup=build_pause_feedback(),
+    )
 
 
 # ── /resume ───────────────────────────────────────────────────────────
@@ -245,7 +260,10 @@ async def cmd_resume(message: Message) -> None:
         repo = ConfigRepo(session)
         await repo.set_value("paused", "false")
 
-    await message.answer("▶️ Distribution resumed.")
+    await message.answer(
+        "▶️ <b>Distribution resumed.</b>",
+        reply_markup=build_resume_feedback(),
+    )
 
 
 # ── /edits ────────────────────────────────────────────────────────────
@@ -253,20 +271,29 @@ async def cmd_resume(message: Message) -> None:
 
 @admin_router.message(Command("edits"))
 async def cmd_edits(message: Message, command: CommandObject) -> None:
-    """Set edit redistribution mode. Usage: /edits off|resend"""
+    """Set edit redistribution mode. Usage: /edits off|resend, or no args for panel."""
     if not _is_admin(message.from_user and message.from_user.id):
         return
 
     mode = (command.args or "").strip().lower()
+
+    # No args → show toggle panel
     if mode not in ("off", "resend"):
-        await message.answer("Usage: /edits off|resend")
+        async with async_session() as session:
+            current = await ConfigRepo(session).get_value("edit_redistribution") or "off"
+        kb = build_edits_panel(current)
+        await message.answer(
+            f"📝 <b>Edit redistribution: {current.upper()}</b>",
+            reply_markup=kb,
+        )
         return
 
     async with async_session() as session:
         repo = ConfigRepo(session)
         await repo.set_value("edit_redistribution", mode)
 
-    await message.answer(f"✅ Edit redistribution: <b>{mode}</b>")
+    kb = build_edits_panel(mode)
+    await message.answer(f"✅ Edit redistribution: <b>{mode}</b>", reply_markup=kb)
 
 
 # ── /remove ───────────────────────────────────────────────────────────
@@ -425,11 +452,20 @@ async def cmd_mute(message: Message, command: CommandObject) -> None:
             return
         duration_str = args_raw[1]
 
-    if target is None or duration_str is None:
+    if target is None:
         await message.answer(
             "Usage: /mute &lt;user_id&gt; &lt;duration&gt;\n"
-            "Or reply to a message + /mute &lt;duration&gt;\n"
+            "Or reply to a message + /mute [duration]\n"
             "Duration: 30m, 2h, 7d, 1d12h"
+        )
+        return
+
+    # Target known but no duration → show preset buttons
+    if duration_str is None:
+        kb = build_mute_presets(target)
+        await message.answer(
+            f"🔇 Mute user <code>{target}</code>?\nSelect duration:",
+            reply_markup=kb,
         )
         return
 
@@ -482,7 +518,8 @@ async def cmd_unmute(message: Message, command: CommandObject) -> None:
     if removed:
         distributor = get_distributor()
         await invalidate_restriction_cache(distributor._redis, target)
-        await message.answer(f"🔊 User <code>{target}</code> unmuted.")
+        kb = build_unmute_undo(target)
+        await message.answer(f"🔊 User <code>{target}</code> unmuted.", reply_markup=kb)
     else:
         await message.answer(f"User <code>{target}</code> is not muted.")
 
@@ -503,51 +540,13 @@ async def cmd_ban(message: Message, command: CommandObject) -> None:
         await message.answer("Usage: /ban &lt;user_id&gt; or reply to a user's message.")
         return
 
-    admin_id = message.from_user.id if message.from_user else 0
-
-    async with async_session() as session:
-        repo = RestrictionRepo(session)
-        await repo.create_restriction(
-            user_id=target,
-            restriction_type="ban",
-            restricted_by=admin_id,
-            expires_at=None,  # Permanent
-        )
-
-    distributor = get_distributor()
-    await invalidate_restriction_cache(distributor._redis, target)
-
-    # Fire ban cleanup (delete redistributed messages) as a background task
-    asyncio.create_task(_ban_cleanup(distributor._bot, target))
-
+    # Show confirmation prompt instead of instant ban
+    kb = build_ban_confirm(target)
     await message.answer(
-        f"⛔ User <code>{target}</code> permanently banned.\n"
-        "Their redistributed messages are being deleted."
+        f"⛔ Permanently ban user <code>{target}</code>?\n"
+        "Their redistributed messages will be deleted.",
+        reply_markup=kb,
     )
-
-
-async def _ban_cleanup(bot, user_id: int) -> None:
-    """Background task: delete all redistributed messages from a banned user."""
-    try:
-        async with async_session() as session:
-            repo = SendLogRepo(session)
-            messages = await repo.get_dest_messages_by_user(user_id)
-
-        deleted = 0
-        for chat_id, msg_id in messages:
-            try:
-                await bot.delete_message(chat_id, msg_id)
-                deleted += 1
-            except Exception:
-                pass  # Message may already be deleted or too old
-            await asyncio.sleep(0.05)  # Gentle rate limiting
-
-        logger.info(
-            "Ban cleanup for user %d: deleted %d / %d messages.",
-            user_id, deleted, len(messages),
-        )
-    except Exception as e:
-        logger.error("Ban cleanup error for user %d: %s", user_id, e)
 
 
 # ── /unban ───────────────────────────────────────────────────────────
@@ -573,7 +572,8 @@ async def cmd_unban(message: Message, command: CommandObject) -> None:
     if removed:
         distributor = get_distributor()
         await invalidate_restriction_cache(distributor._redis, target)
-        await message.answer(f"✅ User <code>{target}</code> unbanned.")
+        kb = build_unban_undo(target)
+        await message.answer(f"✅ User <code>{target}</code> unbanned.", reply_markup=kb)
     else:
         await message.answer(f"User <code>{target}</code> is not banned.")
 
@@ -623,4 +623,5 @@ async def cmd_whois(message: Message, command: CommandObject) -> None:
         f"User ID: <code>{user_id}</code>",
         f"Restriction: {status}",
     ]
-    await message.answer("\n".join(lines))
+    kb = build_moderation_actions(user_id, restriction is not None)
+    await message.answer("\n".join(lines), reply_markup=kb)

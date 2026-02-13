@@ -43,6 +43,7 @@ def _register_routers(dp: Dispatcher) -> None:
     from bot.handlers.membership import membership_router
     from bot.handlers.start import start_router
     from bot.handlers.admin import admin_router
+    from bot.handlers.callbacks import callbacks_router
     from bot.handlers.subscription import subscription_router
     from bot.handlers.edits import edits_router
     from bot.handlers.messages import messages_router
@@ -50,6 +51,7 @@ def _register_routers(dp: Dispatcher) -> None:
     dp.include_router(membership_router)
     dp.include_router(start_router)
     dp.include_router(admin_router)
+    dp.include_router(callbacks_router)  # non-subscription inline buttons
     dp.include_router(subscription_router)
     dp.include_router(edits_router)
     dp.include_router(messages_router)  # must be last (catch-all)

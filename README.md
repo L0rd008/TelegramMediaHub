@@ -51,10 +51,19 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Subscription stacking** — buying a second plan extends from the current expiry date
 - **Cached premium checks** — Redis-backed with 5-min TTL to avoid DB round-trips
 
+### Interactive Buttons
+- **Button-driven interface** — every command provides inline keyboard buttons for quick actions
+- **Settings panel** — `/start` menu with Settings, Plan, and Subscribe buttons
+- **Confirmation prompts** — destructive actions (stop, remove, ban) require button confirmation
+- **Toggle panels** — `/selfsend` and `/broadcast` show current state with toggle buttons when called without args
+- **Admin dashboard** — `/status` includes action buttons; `/list` has pagination buttons
+- **Mute presets** — `/mute` by reply offers 30m / 2h / 1d / 7d preset buttons
+- **Contextual actions** — `/whois` shows Mute/Ban buttons; `/plan` shows relevant next-step buttons
+
 ### Administration
 - **Auto-registration** — bot auto-registers chats upon being added as member or admin (`my_chat_member`)
 - **Configurable signature** — appended to messages, respects API char limits (4 096 text / 1 024 caption)
-- **Paginated chat list** — browse active chats with role flags
+- **Paginated chat list** — browse active chats with role flags and inline pagination
 - **Health endpoint** — `GET /health` returns queue size and Redis status (webhook mode)
 
 ### Infrastructure
@@ -123,33 +132,33 @@ python -m bot
 
 | Command | Description |
 |---|---|
-| `/start` | Register this chat for sending and receiving content |
-| `/stop` | Unregister this chat |
-| `/selfsend on\|off` | Toggle whether you receive your own content back |
-| `/broadcast off\|on in\|out` | Pause/resume incoming or outgoing broadcasts (premium) |
+| `/start` | Register this chat + show quick-action menu buttons |
+| `/stop` | Unregister this chat (shows confirmation buttons) |
+| `/selfsend [on\|off]` | Toggle self-send; no args shows toggle panel |
+| `/broadcast [off\|on in\|out]` | Control broadcasts; no args shows broadcast panel (premium) |
 | `/subscribe [chat_id]` | View premium plans and purchase via Telegram Stars |
-| `/plan` | Show current subscription/trial status and broadcast state |
+| `/plan` | Show subscription/trial status with contextual action buttons |
 
 ### Admin Commands (restricted to `ADMIN_USER_IDS`)
 
 | Command | Description |
 |---|---|
-| `/status` | Bot status — active chats, queue size, signature, pause state |
-| `/list [page]` | Paginated list of all active chats with role flags |
+| `/status` | Bot status with action buttons (pause/resume, edits, signature, chat list) |
+| `/list [page]` | Paginated chat list with inline navigation buttons |
 | `/signature <text>` | Set promotional signature text |
 | `/signatureurl <url>` | Set signature as a URL |
 | `/signatureoff` | Disable signature |
-| `/pause` | Pause all content distribution |
-| `/resume` | Resume distribution |
-| `/edits off\|resend` | Set edit redistribution mode |
-| `/remove <chat_id\|reply>` | Forcibly deactivate a chat |
-| `/grant <chat_id> <plan>` or reply + `/grant <plan>` | Grant a free subscription (week/month/year) |
-| `/revoke <chat_id\|reply>` | Revoke active subscriptions for a chat |
-| `/mute <user_id\|reply> <duration>` | Mute a user for a specified duration (e.g. 30m, 2h, 7d) |
-| `/unmute <user_id\|reply>` | Remove a user's mute |
-| `/ban <user_id\|reply>` | Permanently ban a user and delete their redistributed messages |
-| `/unban <user_id\|reply>` | Remove a user's ban |
-| `/whois <alias>` | Look up a user by their alias (e.g. `/whois u-a3x7k2`) |
+| `/pause` | Pause distribution (shows resume button) |
+| `/resume` | Resume distribution (shows pause button) |
+| `/edits [off\|resend]` | Set edit mode; no args shows toggle panel |
+| `/remove <chat_id\|reply>` | Deactivate a chat (also via chat list buttons) |
+| `/grant <chat_id> <plan>` or reply + `/grant <plan>` | Grant subscription (also via chat list plan picker buttons) |
+| `/revoke <chat_id\|reply>` | Revoke subscriptions (also via chat list buttons) |
+| `/mute <user_id\|reply> [duration]` | Mute a user; no duration shows preset buttons (30m/2h/1d/7d) |
+| `/unmute <user_id\|reply>` | Unmute (shows re-mute undo buttons) |
+| `/ban <user_id\|reply>` | Ban with confirmation button; executes cleanup on confirm |
+| `/unban <user_id\|reply>` | Unban (shows re-ban undo button) |
+| `/whois <alias>` | Look up user by alias with Mute/Ban action buttons |
 
 ---
 
@@ -189,14 +198,16 @@ TelegramMediaHub/
 │   │   ├── distributor.py       # Fan-out worker pool + paywall + reply resolve + alias + SendLogCleaner
 │   │   ├── media_group.py       # Album buffer + auto-flusher
 │   │   ├── signature.py         # Promotional signature appender
+│   │   ├── keyboards.py         # Centralized inline keyboard builders for all commands
 │   │   ├── alias.py             # Sender alias service (cached Redis lookup + formatting)
 │   │   ├── moderation.py        # Restriction checks, duration parser, cache invalidation
 │   │   └── subscription.py      # Premium checks, nudges, trial reminders
 │   │
 │   ├── handlers/
 │   │   ├── membership.py        # my_chat_member auto-registration
-│   │   ├── start.py             # /start, /stop, /selfsend, /broadcast
-│   │   ├── admin.py             # Admin commands + moderation (/mute, /ban, /whois, etc.)
+│   │   ├── start.py             # /start, /stop, /selfsend, /broadcast (with button panels)
+│   │   ├── admin.py             # Admin commands + moderation (with action buttons)
+│   │   ├── callbacks.py         # Unified callback query handler for all non-subscription buttons
 │   │   ├── subscription.py      # /subscribe, /plan, payment callbacks
 │   │   ├── edits.py             # Edit redistribution
 │   │   └── messages.py          # Content redistribution pipeline + reply detection + restriction check

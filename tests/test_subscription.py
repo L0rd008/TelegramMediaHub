@@ -40,7 +40,7 @@ def test_month_plan_is_best_value():
 
 
 def test_year_plan():
-    assert PLANS["year"].stars == 1000
+    assert PLANS["year"].stars == 10000
     assert PLANS["year"].days == 365
 
 
@@ -191,7 +191,7 @@ def test_build_pricing_text_contains_plans():
     text = build_pricing_text()
     assert "250" in text
     assert "750" in text
-    assert "1,000" in text
+    assert "10,000" in text
     assert "BEST VALUE" in text
     assert "Save" in text
 

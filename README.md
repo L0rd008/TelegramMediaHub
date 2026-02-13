@@ -1,6 +1,6 @@
 # TelegramMediaHub
 
-A Python Telegram bot built on **aiogram v3** that receives content from registered chats and redistributes it as **original (non-forwarded) messages** to all other registered destinations — with deduplication, rate-limit safety, privacy guarantees, a monetisation layer via **Telegram Stars**, and scalability to 100 000 chats.
+A Python Telegram bot built on **aiogram v3** that receives content from registered chats and redistributes it as **original (non-forwarded) messages** to all other registered destinations — with reply threading, broadcast control, deduplication, rate-limit safety, privacy guarantees, a monetisation layer via **Telegram Stars**, and scalability to 100 000 chats.
 
 ---
 
@@ -11,6 +11,16 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Album support** — media groups are buffered in Redis and redistributed as intact albums
 - **Privacy first** — never uses `forwardMessage` or `copyMessage`; always re-sends via `send*` with `file_id` reuse, so no forwarding metadata appears
 - **Edit redistribution** — optionally re-send edited messages (configurable: `off` or `resend`)
+
+### Reply Threading
+- **Cross-chat replies** — when a user replies to a bot-sent message in any chat, the reply is distributed to all other chats **as a Telegram Reply** to the corresponding message in each destination
+- **Reverse lookup** — uses the `send_log` table to map `(dest_chat_id, dest_message_id)` back to the original source, then resolves the bot's message in each destination
+- **Graceful degradation** — uses `allow_sending_without_reply=True` so replies still send even if the target message was deleted or pruned from the 48-hour send_log window
+
+### Broadcast Control
+- **Per-chat muting** — `/mute out` pauses outgoing content (stops this chat from broadcasting); `/mute in` pauses incoming content (stops receiving from others)
+- **Resume anytime** — `/unmute out` and `/unmute in` to resume
+- **Premium-gated** — available during the free trial and for premium subscribers; paywalled after trial expiry
 
 ### Deduplication
 - Content fingerprinting using `file_unique_id` (media) or SHA-256 (text)
@@ -27,7 +37,7 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 
 ### Monetisation (Telegram Stars)
 - **Free trial** — configurable via `TRIAL_DAYS` (default: 30 days)
-- **Three plans** — 1 Week (250 ⭐), 1 Month (750 ⭐, "Best Value"), 1 Year (1 000 ⭐)
+- **Three plans** — 1 Week (250 ⭐), 1 Month (750 ⭐, "Best Value"), 1 Year (10 000 ⭐)
 - **Paywall** — cross-chat messages are gated after trial; self-to-self remains free
 - **Nudge system** — daily "You missed X messages" prompt with subscribe button
 - **Trial reminders** — background task sends 7-day, 3-day, 1-day warnings
@@ -93,6 +103,7 @@ python -m bot
 | `LOG_LEVEL` | No | `INFO` | Python logging level |
 | `WEBHOOK_HOST` | No | — | Public hostname for webhook mode |
 | `WEBHOOK_PORT` | No | `8443` | Webhook listener port |
+| `WEBHOOK_PUBLIC_PORT` | No | — | Public-facing port for the webhook URL (use `443` behind a reverse proxy; defaults to `WEBHOOK_PORT` if unset) |
 | `WEBHOOK_PATH` | No | `/webhook` | Webhook URL path |
 | `WEBHOOK_SECRET` | No | — | Secret token for webhook verification |
 | `LOCAL_API_URL` | No | — | Local Bot API server URL (optional, for large files) |
@@ -108,8 +119,10 @@ python -m bot
 | `/start` | Register this chat for sending and receiving content |
 | `/stop` | Unregister this chat |
 | `/selfsend on\|off` | Toggle whether you receive your own content back |
+| `/mute in\|out` | Pause incoming or outgoing broadcasts (premium) |
+| `/unmute in\|out` | Resume incoming or outgoing broadcasts (premium) |
 | `/subscribe [chat_id]` | View premium plans and purchase via Telegram Stars |
-| `/plan` | Show current subscription or trial status |
+| `/plan` | Show current subscription/trial status and broadcast state |
 
 ### Admin Commands (restricted to `ADMIN_USER_IDS`)
 
@@ -124,6 +137,8 @@ python -m bot
 | `/resume` | Resume distribution |
 | `/edits off\|resend` | Set edit redistribution mode |
 | `/remove <chat_id>` | Forcibly deactivate a chat |
+| `/grant <chat_id> <plan>` | Grant a free subscription (week/month/year) |
+| `/revoke <chat_id>` | Revoke active subscriptions for a chat |
 
 ---
 
@@ -140,29 +155,30 @@ TelegramMediaHub/
 │   │   ├── base.py              # SQLAlchemy DeclarativeBase
 │   │   ├── engine.py            # Async engine + session factory
 │   │   └── repositories/
-│   │       ├── chat_repo.py     # Chat CRUD (upsert, deactivate, migrate)
+│   │       ├── chat_repo.py     # Chat CRUD (upsert, deactivate, migrate, toggle)
 │   │       ├── config_repo.py   # Key-value config CRUD
+│   │       ├── send_log_repo.py # Reverse lookup + dest resolution for reply threading
 │   │       └── subscription_repo.py  # Subscription CRUD + trial queries
 │   │
 │   ├── models/
 │   │   ├── chat.py              # Chat registry (with partial index)
 │   │   ├── bot_config.py        # Key-value runtime config
-│   │   ├── send_log.py          # Source → dest message mapping
+│   │   ├── send_log.py          # Source → dest mapping (edits + reply threading)
 │   │   └── subscription.py      # Telegram Stars subscriptions
 │   │
 │   ├── services/
 │   │   ├── normalizer.py        # Message → NormalizedMessage (9 types)
 │   │   ├── dedup.py             # Fingerprinting + Redis seen-cache
 │   │   ├── rate_limiter.py      # Token bucket + circuit breaker
-│   │   ├── sender.py            # NormalizedMessage → Bot API send*
-│   │   ├── distributor.py       # Fan-out worker pool + paywall + SendLogCleaner
+│   │   ├── sender.py            # NormalizedMessage → Bot API send* (with reply_parameters)
+│   │   ├── distributor.py       # Fan-out worker pool + paywall + reply resolve + SendLogCleaner
 │   │   ├── media_group.py       # Album buffer + auto-flusher
 │   │   ├── signature.py         # Promotional signature appender
 │   │   └── subscription.py      # Premium checks, nudges, trial reminders
 │   │
 │   ├── handlers/
 │   │   ├── membership.py        # my_chat_member auto-registration
-│   │   ├── start.py             # /start, /stop, /selfsend
+│   │   ├── start.py             # /start, /stop, /selfsend, /mute, /unmute
 │   │   ├── admin.py             # Admin-only commands
 │   │   ├── subscription.py      # /subscribe, /plan, payment callbacks
 │   │   ├── edits.py             # Edit redistribution
@@ -182,7 +198,8 @@ TelegramMediaHub/
 │   ├── script.py.mako           # Migration template
 │   └── versions/
 │       ├── 001_initial.py       # chats, bot_config, send_log tables
-│       └── 002_subscriptions.py # subscriptions table
+│       ├── 002_subscriptions.py # subscriptions table
+│       └── 003_send_log_dest_index.py  # Reverse-lookup index for reply threading
 │
 ├── alembic.ini
 ├── requirements.txt
@@ -200,7 +217,7 @@ TelegramMediaHub/
 |---|---|
 | `chats` | Registry of all known chats (with `active`, `is_source`, `is_destination` flags) |
 | `bot_config` | Key-value store for runtime config (signature, pause state, edit mode) |
-| `send_log` | Tracks source→destination message mapping for edit support (48 h retention) |
+| `send_log` | Tracks source→destination message mapping for edit support and reply threading (48 h retention, dual-indexed) |
 | `subscriptions` | Telegram Stars payment records with plan, expiry, and charge ID |
 
 ---

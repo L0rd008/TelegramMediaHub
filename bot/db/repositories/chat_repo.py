@@ -125,3 +125,17 @@ class ChatRepo:
             select(Chat).where(Chat.chat_id == chat_id)
         )
         return result.scalar_one_or_none()
+
+    async def toggle_source(self, chat_id: int, enabled: bool) -> None:
+        """Toggle is_source (outgoing broadcasting) for a chat."""
+        await self._s.execute(
+            update(Chat).where(Chat.chat_id == chat_id).values(is_source=enabled)
+        )
+        await self._s.commit()
+
+    async def toggle_destination(self, chat_id: int, enabled: bool) -> None:
+        """Toggle is_destination (incoming broadcasting) for a chat."""
+        await self._s.execute(
+            update(Chat).where(Chat.chat_id == chat_id).values(is_destination=enabled)
+        )
+        await self._s.commit()

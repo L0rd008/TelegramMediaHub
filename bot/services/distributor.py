@@ -24,6 +24,7 @@ from bot.config import settings
 from bot.db.engine import async_session
 from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.config_repo import ConfigRepo
+from bot.db.repositories.send_log_repo import SendLogRepo
 from bot.services.normalizer import NormalizedMessage
 from bot.services.rate_limiter import RateLimiter
 from bot.services.sender import send_single
@@ -40,6 +41,7 @@ class SendTask:
     dest_chat_id: int
     dest_chat_type: str = "private"
     retry_count: int = 0
+    reply_to_message_id: int | None = None
 
 
 class Distributor:
@@ -109,11 +111,23 @@ class Distributor:
                         )
                     continue  # Skip this destination
 
+            # ── Reply threading: resolve per-destination ─────────
+            reply_to: int | None = None
+            if msg.reply_source_chat_id and msg.reply_source_message_id:
+                async with async_session() as session:
+                    sl_repo = SendLogRepo(session)
+                    reply_to = await sl_repo.get_dest_message_id(
+                        msg.reply_source_chat_id,
+                        msg.reply_source_message_id,
+                        dest.chat_id,
+                    )
+
             await self._queue.put(
                 SendTask(
                     message=msg,
                     dest_chat_id=dest.chat_id,
                     dest_chat_type=dest.chat_type,
+                    reply_to_message_id=reply_to,
                 )
             )
 
@@ -126,7 +140,8 @@ class Distributor:
             missed_text = f"<b>{missed} message{'s' if missed != 1 else ''}</b>"
             text = (
                 f"🔒 You missed {missed_text} from your network today.\n\n"
-                "Unlock all content for just <b>25 ⭐/day</b> with Premium."
+                "Premium includes cross-chat content, reply threading, "
+                "and broadcast control — from just <b>25 ⭐/day</b>."
             )
             await self._bot.send_message(
                 chat_id,
@@ -163,7 +178,10 @@ class Distributor:
             signature = await self._get_signature()
 
             # Send
-            result = await send_single(self._bot, msg, task.dest_chat_id, signature)
+            result = await send_single(
+                self._bot, msg, task.dest_chat_id, signature,
+                reply_to_message_id=task.reply_to_message_id,
+            )
 
             # Log success
             self._rate_limiter.report_success(task.dest_chat_id)

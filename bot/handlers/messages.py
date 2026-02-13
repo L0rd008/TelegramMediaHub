@@ -9,6 +9,7 @@ from aiogram.types import Message
 
 from bot.db.engine import async_session
 from bot.db.repositories.chat_repo import ChatRepo
+from bot.db.repositories.send_log_repo import SendLogRepo
 from bot.services.dedup import is_duplicate, is_media_group_seen
 from bot.services.distributor import get_distributor
 from bot.services.media_group import get_media_group_buffer
@@ -79,6 +80,24 @@ async def _handle_content(message: Message) -> None:
     if await is_duplicate(redis, normalized, bot_info.id):
         logger.debug("Dropping duplicate message %d", message.message_id)
         return
+
+    # 5b. Reply detection – if the user replied to a bot message, resolve the
+    #     original source via send_log so the distributor can thread replies.
+    reply = message.reply_to_message
+    if reply and reply.from_user and reply.from_user.id == bot_info.id:
+        async with async_session() as session:
+            sl_repo = SendLogRepo(session)
+            origin = await sl_repo.reverse_lookup(message.chat.id, reply.message_id)
+            if origin:
+                normalized.reply_source_chat_id = origin[0]
+                normalized.reply_source_message_id = origin[1]
+                logger.debug(
+                    "Reply detected: msg %d replies to bot msg %d → source (%d, %d)",
+                    message.message_id,
+                    reply.message_id,
+                    origin[0],
+                    origin[1],
+                )
 
     # 6. Distribute
     await distributor.distribute(normalized)

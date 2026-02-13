@@ -72,6 +72,9 @@ async def cmd_plan(message: Message) -> None:
 
     if active_sub:
         remaining = (active_sub.expires_at - active_sub.starts_at).days
+        # Build mute status lines
+        source_status = "🔊 Sending" if chat.is_source else "🔇 Sending paused"
+        dest_status = "🔊 Receiving" if chat.is_destination else "🔇 Receiving paused"
         lines = [
             "⭐ <b>Premium Active</b>",
             "",
@@ -79,10 +82,17 @@ async def cmd_plan(message: Message) -> None:
             f"Expires: <b>{active_sub.expires_at.strftime('%d %b %Y')}</b>",
             f"({remaining} days remaining)",
             "",
+            f"<b>Broadcast:</b> {source_status} · {dest_status}",
+            "",
             "You have full access to all content.",
         ]
         await message.answer("\n".join(lines))
         return
+
+    # Build broadcast status (available during trial too)
+    source_status = "🔊 Sending" if chat.is_source else "🔇 Sending paused"
+    dest_status = "🔊 Receiving" if chat.is_destination else "🔇 Receiving paused"
+    broadcast_line = f"<b>Broadcast:</b> {source_status} · {dest_status}"
 
     # Check trial
     trial_left = get_trial_days_remaining(chat.registered_at)
@@ -91,6 +101,8 @@ async def cmd_plan(message: Message) -> None:
             "🆓 <b>Free Trial Active</b>",
             "",
             f"Days remaining: <b>{trial_left}</b>",
+            "",
+            broadcast_line,
             "",
             "You currently have full access to all features.",
             "After the trial, only self-to-self messages will be free.",
@@ -105,7 +117,10 @@ async def cmd_plan(message: Message) -> None:
         "🔒 <b>Trial Expired</b>",
         "",
         "You can still send and receive your <b>own</b> messages,",
-        "but content from other chats is paused.",
+        "but these features are locked:",
+        "  • Content from other chats",
+        "  • Reply threading",
+        "  • Broadcast control (/mute & /unmute)",
         "",
         "Unlock everything for just <b>25 ⭐/day</b>.",
     ]

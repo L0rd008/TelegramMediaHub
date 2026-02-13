@@ -18,6 +18,7 @@ from aiogram.types import (
     InputMediaVideo,
     Message,
     MessageEntity,
+    ReplyParameters,
 )
 
 from bot.services.normalizer import NormalizedMessage
@@ -58,6 +59,7 @@ async def send_single(
     msg: NormalizedMessage,
     chat_id: int,
     signature: str | None,
+    reply_to_message_id: int | None = None,
 ) -> Message | None:
     """Send a single NormalizedMessage to *chat_id*. Returns the sent Message."""
 
@@ -66,6 +68,14 @@ async def send_single(
     entities = _rebuild_entities(msg.entities)
     caption_entities = _rebuild_entities(msg.caption_entities)
 
+    # Build reply_parameters if we have a reply target
+    reply_params: ReplyParameters | None = None
+    if reply_to_message_id:
+        reply_params = ReplyParameters(
+            message_id=reply_to_message_id,
+            allow_sending_without_reply=True,
+        )
+
     try:
         match msg.message_type:
             case MessageType.TEXT:
@@ -73,6 +83,7 @@ async def send_single(
                     chat_id=chat_id,
                     text=text or "",
                     entities=entities,
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.PHOTO:
@@ -83,6 +94,7 @@ async def send_single(
                     caption_entities=caption_entities,
                     has_spoiler=msg.has_spoiler,
                     show_caption_above_media=msg.show_caption_above_media or None,
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.VIDEO:
@@ -97,6 +109,7 @@ async def send_single(
                     has_spoiler=msg.has_spoiler,
                     supports_streaming=msg.supports_streaming,
                     show_caption_above_media=msg.show_caption_above_media or None,
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.ANIMATION:
@@ -110,6 +123,7 @@ async def send_single(
                     height=msg.height,
                     has_spoiler=msg.has_spoiler,
                     show_caption_above_media=msg.show_caption_above_media or None,
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.AUDIO:
@@ -121,6 +135,7 @@ async def send_single(
                     duration=msg.duration,
                     performer=msg.performer,
                     title=msg.title,
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.DOCUMENT:
@@ -129,6 +144,7 @@ async def send_single(
                     document=msg.file_id,  # type: ignore[arg-type]
                     caption=caption,
                     caption_entities=caption_entities,
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.VOICE:
@@ -138,6 +154,7 @@ async def send_single(
                     caption=caption,
                     caption_entities=caption_entities,
                     duration=msg.duration,
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.VIDEO_NOTE:
@@ -146,17 +163,21 @@ async def send_single(
                     video_note=msg.file_id,  # type: ignore[arg-type]
                     duration=msg.duration,
                     length=msg.width,  # diameter
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.STICKER:
-                # Stickers don't support captions – no signature
                 return await bot.send_sticker(
                     chat_id=chat_id,
                     sticker=msg.file_id,  # type: ignore[arg-type]
+                    reply_parameters=reply_params,
                 )
 
             case MessageType.MEDIA_GROUP:
-                return await send_media_group(bot, msg, chat_id, signature)
+                return await send_media_group(
+                    bot, msg, chat_id, signature,
+                    reply_to_message_id=reply_to_message_id,
+                )
 
             case _:
                 logger.warning("Unknown message type: %s", msg.message_type)
@@ -177,6 +198,7 @@ async def send_media_group(
     msg: NormalizedMessage,
     chat_id: int,
     signature: str | None,
+    reply_to_message_id: int | None = None,
 ) -> Message | None:
     """Send a media group (album) to *chat_id*.
 
@@ -191,7 +213,10 @@ async def send_media_group(
 
     # Single item → send as individual message
     if len(msg.group_items) == 1:
-        return await send_single(bot, msg.group_items[0], chat_id, signature)
+        return await send_single(
+            bot, msg.group_items[0], chat_id, signature,
+            reply_to_message_id=reply_to_message_id,
+        )
 
     # Group items by compatible types
     groups = _split_by_compatibility(msg.group_items)
@@ -266,11 +291,24 @@ async def send_media_group(
                     await send_single(bot, item, chat_id, signature if i == 0 else None)
                     continue
 
+        # Build reply_parameters for media groups
+        mg_reply_params: ReplyParameters | None = None
+        if reply_to_message_id:
+            mg_reply_params = ReplyParameters(
+                message_id=reply_to_message_id,
+                allow_sending_without_reply=True,
+            )
+
         if len(input_media) >= 2:
             # Send in chunks of 10 (Telegram limit)
             for chunk_start in range(0, len(input_media), 10):
                 chunk = input_media[chunk_start : chunk_start + 10]
-                result = await bot.send_media_group(chat_id=chat_id, media=chunk)
+                result = await bot.send_media_group(
+                    chat_id=chat_id, media=chunk,
+                    reply_parameters=mg_reply_params,
+                )
+                # Only reply to the first chunk
+                mg_reply_params = None
                 if first_result is None and result:
                     first_result = result[0]
         elif len(input_media) == 1:

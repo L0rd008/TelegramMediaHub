@@ -152,6 +152,11 @@ def build_pricing_text() -> str:
     lines = [
         "<b>Unlock Premium — Full Access to All Content</b>",
         "",
+        "<b>What's included:</b>",
+        "  ✅ Receive content from <b>every</b> registered chat",
+        "  ✅ Reply threading across all chats",
+        "  ✅ Broadcast control (<code>/mute</code> & <code>/unmute</code>)",
+        "",
         "Choose the plan that works for you:",
         "",
         f"  ⏱  <b>{week.label}</b> — {week.stars} ⭐",
@@ -161,10 +166,10 @@ def build_pricing_text() -> str:
         f"      <i>~{monthly_daily:.0f} ⭐/day  •  Save {saving_vs_weekly}%</i>",
         "",
         f"  📅 <b>{year.label}</b> — {year.stars:,} ⭐",
-        f"      <i>~{year.stars / year.days:.1f} ⭐/day</i>",
+        "      <i>No renewals for a full year</i>",
         "",
         "After your trial ends, only self-to-self messages are free.",
-        "Premium unlocks content from <b>every</b> registered chat.",
+        "Premium unlocks <b>everything</b>.",
     ]
     return "\n".join(lines)
 
@@ -272,9 +277,11 @@ class TrialReminderTask:
 
         text = (
             f"{urgency} Your free trial ends {time_text}.\n\n"
-            "After that, you'll only receive your <b>own</b> messages. "
-            "Content from other chats will require a subscription.\n\n"
-            "Unlock everything for just <b>25 ⭐/day</b> with the monthly plan."
+            "After that, you'll lose:\n"
+            "  • Content from other chats\n"
+            "  • Reply threading\n"
+            "  • Broadcast control (/mute & /unmute)\n\n"
+            "Keep everything for just <b>25 ⭐/day</b> with the monthly plan."
         )
         try:
             await self._bot.send_message(

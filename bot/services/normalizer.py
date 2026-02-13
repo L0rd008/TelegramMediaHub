@@ -48,6 +48,10 @@ class NormalizedMessage:
     # Media group items (populated only for MEDIA_GROUP type)
     group_items: list[NormalizedMessage] = field(default_factory=list)
 
+    # Reply threading – set by the message handler after send_log reverse lookup
+    reply_source_chat_id: int | None = None
+    reply_source_message_id: int | None = None
+
 
 def _entities_to_dicts(entities: list[MessageEntity] | None) -> list[dict[str, Any]] | None:
     """Convert MessageEntity list to serializable dicts (for JSON storage in media group buffer)."""

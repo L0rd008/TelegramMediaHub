@@ -24,6 +24,7 @@ class SendLog(Base):
 
     __table_args__ = (
         Index("idx_send_log_source", "source_chat_id", "source_message_id"),
+        Index("idx_send_log_dest", "dest_chat_id", "dest_message_id"),
     )
 
     def __repr__(self) -> str:

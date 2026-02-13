@@ -196,6 +196,21 @@ def test_build_pricing_text_contains_plans():
     assert "Save" in text
 
 
+def test_build_pricing_text_contains_features():
+    """Pricing text should list the new premium features."""
+    text = build_pricing_text()
+    assert "Reply threading" in text
+    assert "/mute" in text
+    assert "/unmute" in text
+    assert "Broadcast control" in text
+
+
+def test_build_pricing_text_yearly_no_per_day():
+    """Yearly plan should say 'No renewals for a full year' instead of per-day cost."""
+    text = build_pricing_text()
+    assert "No renewals for a full year" in text
+
+
 def test_build_pricing_keyboard_has_three_buttons():
     kb = build_pricing_keyboard(123)
     assert len(kb.inline_keyboard) == 3

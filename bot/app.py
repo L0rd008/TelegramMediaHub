@@ -174,8 +174,14 @@ async def main() -> None:
     _register_middleware(dp)
     _register_routers(dp)
 
-    dp.startup.register(lambda: _on_startup(bot, redis, dp))
-    dp.shutdown.register(lambda: _on_shutdown(dp))
+    async def on_startup(*_args: object, **_kwargs: object) -> None:
+        await _on_startup(bot, redis, dp)
+
+    async def on_shutdown(*_args: object, **_kwargs: object) -> None:
+        await _on_shutdown(dp)
+
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
 
     if settings.BOT_MODE == "webhook":
         await _run_webhook(bot, dp)

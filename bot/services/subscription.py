@@ -56,6 +56,11 @@ async def is_premium(
     """
     cache_key = f"sub:{chat_id}"
     cached = await redis.get(cache_key)
+    # Admins never need a subscription.
+    if chat_id in settings.admin_ids:
+        if cached != "1":
+            await redis.set(cache_key, "1", ex=CACHE_TTL)
+        return True
     if cached is not None:
         return cached == "1"
 
@@ -247,6 +252,8 @@ class TrialReminderTask:
                 chats = await repo.get_expiring_trials(days_before)
 
             for chat in chats:
+                if chat.chat_id in settings.admin_ids:
+                    continue
                 # Avoid sending duplicates using Redis
                 dedup_key = f"trial_remind:{chat.chat_id}:{days_before}"
                 if await self._redis.set(dedup_key, "1", ex=86_400 * 2, nx=True):

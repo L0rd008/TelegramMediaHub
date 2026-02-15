@@ -26,6 +26,8 @@ from bot.services.keyboards import (
     build_chat_list_nav,
     build_edits_panel,
     build_grant_plans,
+    build_help_back,
+    build_help_menu,
     build_moderation_actions,
     build_mute_presets,
     build_pause_feedback,
@@ -785,8 +787,8 @@ async def cb_ban_prompt(callback: CallbackQuery) -> None:
     kb = build_ban_confirm(user_id)
     try:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"⛔ Permanently ban user <code>{user_id}</code>?\n"
-            "Their redistributed messages will be deleted.",
+            f"⛔ Permanently ban user <code>{user_id}</code>?\n\n"
+            "Choose whether to also delete their past messages:",
             reply_markup=kb,
         )
     except Exception:
@@ -794,8 +796,9 @@ async def cb_ban_prompt(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@callbacks_router.callback_query(F.data.regexp(r"^bny:\d+$"))
-async def cb_ban_exec(callback: CallbackQuery) -> None:
+@callbacks_router.callback_query(F.data.regexp(r"^byd:\d+$"))
+async def cb_ban_delete(callback: CallbackQuery) -> None:
+    """Ban a user AND delete all their redistributed messages."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("Admin only.", show_alert=True)
         return
@@ -815,7 +818,7 @@ async def cb_ban_exec(callback: CallbackQuery) -> None:
     if redis:
         await invalidate_restriction_cache(redis, user_id)
 
-    # Fire ban cleanup
+    # Fire ban cleanup (message deletion)
     from bot.services.distributor import get_distributor
     distributor = get_distributor()
     asyncio.create_task(_ban_cleanup_bg(distributor._bot, user_id))
@@ -824,6 +827,38 @@ async def cb_ban_exec(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"⛔ User <code>{user_id}</code> permanently banned.\n"
             "Their redistributed messages are being deleted.",
+        )
+    except Exception:
+        pass
+    await callback.answer("Banned.")
+
+
+@callbacks_router.callback_query(F.data.regexp(r"^byn:\d+$"))
+async def cb_ban_only(callback: CallbackQuery) -> None:
+    """Ban a user without deleting their past messages."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Admin only.", show_alert=True)
+        return
+
+    user_id = int((callback.data or "").split(":")[1])
+    admin_id = callback.from_user.id
+
+    async with async_session() as session:
+        await RestrictionRepo(session).create_restriction(
+            user_id=user_id,
+            restriction_type="ban",
+            restricted_by=admin_id,
+            expires_at=None,
+        )
+
+    redis = _get_redis()
+    if redis:
+        await invalidate_restriction_cache(redis, user_id)
+
+    try:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            f"⛔ User <code>{user_id}</code> permanently banned.\n"
+            "Their past messages were kept.",
         )
     except Exception:
         pass
@@ -876,4 +911,120 @@ async def cb_unban(callback: CallbackQuery) -> None:
         await callback.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
         pass
+    await callback.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# HELP CALLBACKS
+# ══════════════════════════════════════════════════════════════════════
+
+
+_HELP_MAIN_TEXT = (
+    "📖 <b>Help</b>\n\n"
+    "I sync your messages across all your connected Telegram chats "
+    "— they arrive as originals, never as forwards.\n\n"
+    "<b>Commands</b>\n"
+    "/start — Connect this chat\n"
+    "/stop — Disconnect this chat\n"
+    "/selfsend — Echo your own messages back\n"
+    "/broadcast — Control what you send and receive\n"
+    "/subscribe — Go Premium\n"
+    "/plan — Check your current plan\n"
+    "/stats — Your activity and stats\n"
+    "/help — This guide"
+)
+
+_HELP_HOW_TEXT = (
+    "💡 <b>How it works</b>\n\n"
+    "Send any message here — text, photo, video, sticker, voice, "
+    "document — and it appears in all your other connected chats "
+    "as an original message, never a forward.\n\n"
+    "• <b>Replies stay threaded</b> — reply to a synced message "
+    "and the reply shows up in every chat as a proper Telegram reply\n"
+    "• <b>Your tag appears on messages</b> — a readable name like "
+    "<b>golden_arrow</b> links back to the bot on every message you send\n"
+    "• <b>Works everywhere</b> — private chats, groups, supergroups, "
+    "and channels\n"
+    "• <b>Privacy first</b> — no forwarding tags, no metadata leaks"
+)
+
+_HELP_PREM_TEXT = (
+    "⭐ <b>About Premium</b>\n\n"
+    "You get <b>30 days of full access</b> from the moment you connect. "
+    "After that, messages from other users to your chats require a "
+    "Premium plan.\n\n"
+    "• <b>Sync Control</b> — choose exactly what this chat sends "
+    "and receives\n"
+    "• <b>Full network access</b> — keep getting messages from everyone\n"
+    "• <b>Plans start at ~1 star per hour</b>\n\n"
+    "Tap /subscribe to see pricing, or /plan to check your status."
+)
+
+_HELP_ADMIN_TEXT = (
+    "🛠 <b>Admin Guide</b>\n\n"
+    "<b>Configuration</b>\n"
+    "/status — Live dashboard with action buttons\n"
+    "/pause · /resume — Control all distribution\n"
+    "/edits — Toggle edit redistribution (off / resend)\n"
+    "/signature · /signatureurl · /signatureoff — Message signature\n\n"
+    "<b>Chat management</b>\n"
+    "/list — Browse connected chats with pagination\n"
+    "/remove — Disconnect a chat (by ID or reply)\n"
+    "/grant — Give someone Premium (by ID or reply)\n"
+    "/revoke — Remove someone's Premium (by ID or reply)\n\n"
+    "<b>Moderation</b>\n"
+    "/mute — Temporarily silence a user (preset buttons or custom duration)\n"
+    "/unmute — Lift a mute\n"
+    "/ban — Permanently block (with or without deleting their messages)\n"
+    "/unban — Lift a ban\n"
+    "/whois — Look up user by their alias name\n\n"
+    "<i>Tip: all moderation commands work by replying to a message "
+    "or passing a user ID.</i>"
+)
+
+
+@callbacks_router.callback_query(F.data == "help:how")
+async def cb_help_how(callback: CallbackQuery) -> None:
+    admin = _is_admin(callback.from_user.id)
+    kb = build_help_back(admin)
+    try:
+        await callback.message.edit_text(_HELP_HOW_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+    except Exception:
+        await callback.message.answer(_HELP_HOW_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+    await callback.answer()
+
+
+@callbacks_router.callback_query(F.data == "help:prem")
+async def cb_help_prem(callback: CallbackQuery) -> None:
+    admin = _is_admin(callback.from_user.id)
+    kb = build_help_back(admin)
+    try:
+        await callback.message.edit_text(_HELP_PREM_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+    except Exception:
+        await callback.message.answer(_HELP_PREM_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+    await callback.answer()
+
+
+@callbacks_router.callback_query(F.data == "help:admin")
+async def cb_help_admin(callback: CallbackQuery) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Admin only.", show_alert=True)
+        return
+
+    kb = build_help_back(is_admin=True)
+    try:
+        await callback.message.edit_text(_HELP_ADMIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+    except Exception:
+        await callback.message.answer(_HELP_ADMIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+    await callback.answer()
+
+
+@callbacks_router.callback_query(F.data == "help:back")
+async def cb_help_back(callback: CallbackQuery) -> None:
+    admin = _is_admin(callback.from_user.id)
+    kb = build_help_menu(admin)
+    try:
+        await callback.message.edit_text(_HELP_MAIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+    except Exception:
+        await callback.message.answer(_HELP_MAIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
     await callback.answer()

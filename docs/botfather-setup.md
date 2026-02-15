@@ -72,6 +72,7 @@ broadcast - Control what you send and receive
 subscribe - Go Premium
 plan - Check your current plan
 stats - See how your chat is doing
+help - Quick guide and command list
 status - Dashboard (admin)
 list - Browse connected chats (admin)
 pause - Pause all syncing (admin)
@@ -85,9 +86,9 @@ grant - Give someone Premium (admin)
 revoke - Remove someone's Premium (admin)
 mute - Temporarily silence a user (admin)
 unmute - Unsilence a user (admin)
-ban - Permanently block a user (admin)
+ban - Block a user permanently (admin)
 unban - Unblock a user (admin)
-whois - Look up who sent something (admin)
+whois - Look up a user by name (admin)
 ```
 
 ---

@@ -3,22 +3,21 @@
 from __future__ import annotations
 
 import secrets
-import string
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.user_alias import UserAlias
+from bot.services.alias_words import ADJECTIVES, NOUNS
 
-_ALIAS_CHARS = string.ascii_lowercase + string.digits
-_ALIAS_LEN = 6
 _MAX_RETRIES = 10
 
 
 def _generate_alias() -> str:
-    """Generate a random alias like ``u-a3x7k2``."""
-    body = "".join(secrets.choice(_ALIAS_CHARS) for _ in range(_ALIAS_LEN))
-    return f"u-{body}"
+    """Generate a readable two-word alias like ``golden_arrow``."""
+    adj = secrets.choice(ADJECTIVES)
+    noun = secrets.choice(NOUNS)
+    return f"{adj}_{noun}"
 
 
 class AliasRepo:
@@ -46,8 +45,8 @@ class AliasRepo:
                 await self._s.commit()
                 return alias
 
-        # Extremely unlikely fallback — use hex of user_id
-        fallback = f"u-{user_id % 0xFFFFFF:06x}"
+        # Extremely unlikely fallback — use adj + user_id suffix
+        fallback = f"{secrets.choice(ADJECTIVES)}_{user_id % 9999}"
         row = UserAlias(user_id=user_id, alias=fallback)
         self._s.add(row)
         await self._s.commit()

@@ -14,7 +14,7 @@ class UserAlias(Base):
     __tablename__ = "user_aliases"
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    alias: Mapped[str] = mapped_column(String(12), unique=True, nullable=False)
+    alias: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

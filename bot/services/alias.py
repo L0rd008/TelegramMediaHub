@@ -32,6 +32,12 @@ async def get_alias(redis: aioredis.Redis, user_id: int) -> str:
     return alias
 
 
-def format_alias_tag(alias: str) -> str:
-    """Return the HTML tag appended to messages: ``<code>[u-xxxxx]</code>``."""
-    return f"<code>[{alias}]</code>"
+def format_alias_tag(alias: str, bot_username: str = "") -> str:
+    """Return the HTML alias tag appended to messages.
+
+    If *bot_username* is provided the tag is a clickable link to the bot;
+    otherwise it falls back to a plain ``<code>`` tag.
+    """
+    if bot_username:
+        return f'<a href="https://t.me/{bot_username}">{alias}</a>'
+    return f"<code>{alias}</code>"

@@ -40,6 +40,12 @@ async def on_channel_post(message: Message) -> None:
 
 async def _handle_content(message: Message) -> None:
     """Common handler: restriction check → normalize → source check → dedup → distribute/buffer."""
+    # 0. Ignore bot commands so command routers can handle them.
+    if message.text and message.entities:
+        first = message.entities[0]
+        if first.type == "bot_command" and first.offset == 0:
+            return
+
     # 0. Check user restrictions (mute/ban) – drop early to save resources
     user_id = message.from_user.id if message.from_user else None
     if user_id:
@@ -93,20 +99,28 @@ async def _handle_content(message: Message) -> None:
     # 5b. Reply detection – if the user replied to a bot message, resolve the
     #     original source via send_log so the distributor can thread replies.
     reply = message.reply_to_message
-    if reply and reply.from_user and reply.from_user.id == bot_info.id:
-        async with async_session() as session:
-            sl_repo = SendLogRepo(session)
-            origin = await sl_repo.reverse_lookup(message.chat.id, reply.message_id)
-            if origin:
-                normalized.reply_source_chat_id = origin[0]
-                normalized.reply_source_message_id = origin[1]
-                logger.debug(
-                    "Reply detected: msg %d replies to bot msg %d → source (%d, %d)",
-                    message.message_id,
-                    reply.message_id,
-                    origin[0],
-                    origin[1],
-                )
+    if reply:
+        should_check = True
+        if reply.from_user and reply.from_user.id != bot_info.id:
+            should_check = False
+        if should_check:
+            try:
+                async with async_session() as session:
+                    sl_repo = SendLogRepo(session)
+                    origin = await sl_repo.reverse_lookup(message.chat.id, reply.message_id)
+                if origin:
+                    normalized.reply_source_chat_id = origin[0]
+                    normalized.reply_source_message_id = origin[1]
+                    logger.debug(
+                        "Reply detected: msg %d replies to bot msg %d -> source (%d, %d)",
+                        message.message_id,
+                        reply.message_id,
+                        origin[0],
+                        origin[1],
+                    )
+            except Exception as e:
+                logger.debug("Reply reverse-lookup failed for %d: %s", reply.message_id, e)
 
     # 6. Distribute
+
     await distributor.distribute(normalized)

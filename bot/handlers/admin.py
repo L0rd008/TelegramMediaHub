@@ -540,11 +540,11 @@ async def cmd_ban(message: Message, command: CommandObject) -> None:
         await message.answer("Usage: /ban &lt;user_id&gt; or reply to a user's message.")
         return
 
-    # Show confirmation prompt instead of instant ban
+    # Show confirmation prompt with ban options
     kb = build_ban_confirm(target)
     await message.answer(
-        f"⛔ Permanently ban user <code>{target}</code>?\n"
-        "Their redistributed messages will be deleted.",
+        f"⛔ Permanently ban user <code>{target}</code>?\n\n"
+        "Choose whether to also delete their past messages:",
         reply_markup=kb,
     )
 
@@ -583,24 +583,27 @@ async def cmd_unban(message: Message, command: CommandObject) -> None:
 
 @admin_router.message(Command("whois"))
 async def cmd_whois(message: Message, command: CommandObject) -> None:
-    """Look up a user by their alias. Usage: /whois <alias>"""
+    """Look up a user by their alias. Usage: /whois <name> (e.g. /whois golden_arrow)"""
     if not _is_admin(message.from_user and message.from_user.id):
         return
 
-    alias = (command.args or "").strip().lower()
-    if not alias:
-        await message.answer("Usage: /whois &lt;alias&gt;  (e.g. /whois u-a3x7k2)")
+    raw = (command.args or "").strip().lower()
+    if not raw:
+        await message.answer(
+            "Usage: /whois &lt;name&gt;  (e.g. /whois golden_arrow)\n"
+            "Spaces and underscores are interchangeable."
+        )
         return
 
-    # Strip brackets if provided
-    alias = alias.strip("[]")
+    # Flexible matching: strip brackets, normalise spaces→underscores
+    alias = raw.strip("[]").replace(" ", "_")
 
     async with async_session() as session:
         alias_repo = AliasRepo(session)
         user_id = await alias_repo.lookup_by_alias(alias)
 
     if user_id is None:
-        await message.answer(f"No user found for alias <code>{alias}</code>.")
+        await message.answer(f"No user found for <b>{alias}</b>.")
         return
 
     # Check restrictions
@@ -618,7 +621,7 @@ async def cmd_whois(message: Message, command: CommandObject) -> None:
             status = f"{rtype} (permanent)"
 
     lines = [
-        f"🔍 <b>Alias Lookup: <code>{alias}</code></b>",
+        f"🔍 <b>Alias Lookup: {alias}</b>",
         "",
         f"User ID: <code>{user_id}</code>",
         f"Restriction: {status}",

@@ -184,20 +184,29 @@ async def test_invalidate_restriction_cache(fake_redis):
 
 
 def test_alias_format():
-    """Aliases should match u-XXXXXX pattern."""
+    """Aliases should be two words joined by underscore."""
     from bot.db.repositories.alias_repo import _generate_alias
 
     alias = _generate_alias()
-    assert alias.startswith("u-")
-    assert len(alias) == 8  # "u-" + 6 chars
+    parts = alias.split("_")
+    assert len(parts) == 2
+    assert all(p.isalpha() for p in parts)
 
 
-def test_alias_format_tag():
-    """format_alias_tag should return HTML code tag."""
+def test_alias_format_tag_with_bot_username():
+    """format_alias_tag with bot_username should return a clickable link."""
     from bot.services.alias import format_alias_tag
 
-    result = format_alias_tag("u-abc123")
-    assert result == "<code>[u-abc123]</code>"
+    result = format_alias_tag("golden_arrow", "MediaHubBot")
+    assert result == '<a href="https://t.me/MediaHubBot">golden_arrow</a>'
+
+
+def test_alias_format_tag_no_bot_username():
+    """format_alias_tag without bot_username should return plain code tag."""
+    from bot.services.alias import format_alias_tag
+
+    result = format_alias_tag("golden_arrow")
+    assert result == "<code>golden_arrow</code>"
 
 
 # ── NormalizedMessage source_user_id ─────────────────────────────────

@@ -114,12 +114,21 @@ class Distributor:
             # ── Reply threading: resolve per-destination ─────────
             reply_to: int | None = None
             if msg.reply_source_chat_id and msg.reply_source_message_id:
-                async with async_session() as session:
-                    sl_repo = SendLogRepo(session)
-                    reply_to = await sl_repo.get_dest_message_id(
+                try:
+                    async with async_session() as session:
+                        sl_repo = SendLogRepo(session)
+                        reply_to = await sl_repo.get_dest_message_id(
+                            msg.reply_source_chat_id,
+                            msg.reply_source_message_id,
+                            dest.chat_id,
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "Reply dest lookup failed for (%d, %d) -> %d: %s",
                         msg.reply_source_chat_id,
                         msg.reply_source_message_id,
                         dest.chat_id,
+                        e,
                     )
 
             await self._queue.put(

@@ -194,7 +194,9 @@ def build_mute_presets(user_id: int) -> InlineKeyboardMarkup:
 
 def build_ban_confirm(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("⛔ Confirm Ban", f"bny:{user_id}"), _btn("Cancel", "noop")],
+        [_btn("⛔ Ban + Delete Messages", f"byd:{user_id}")],
+        [_btn("⛔ Ban Only", f"byn:{user_id}")],
+        [_btn("Cancel", "noop")],
     ])
 
 
@@ -247,6 +249,24 @@ def build_plan_trial_actions() -> InlineKeyboardMarkup:
         [_btn("📡 Broadcast Control", "bc:panel"), _btn("⚙️ Settings", "settings")],
         [_btn("⭐ View Plans", "sub:show")],
     ])
+
+
+# ── User/Admin: Help menu ─────────────────────────────────────────────
+
+def build_help_menu(is_admin: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [_btn("💡 How it works", "help:how"), _btn("⭐ About Premium", "help:prem")],
+    ]
+    if is_admin:
+        rows.append([_btn("🛠 Admin Guide", "help:admin")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_help_back(is_admin: bool) -> InlineKeyboardMarkup:
+    rows = [[_btn("⬅️ Back to Help", "help:back")]]
+    if is_admin:
+        rows[0].append(_btn("🛠 Admin Guide", "help:admin"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ── User/Admin: Stats contextual buttons ────────────────────────────

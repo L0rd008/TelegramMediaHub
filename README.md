@@ -23,11 +23,12 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Premium-gated** — available during the free trial and for premium subscribers; paywalled after trial expiry
 
 ### Moderation & Aliases
-- **Sender aliases** — each user gets a persistent random pseudonym (e.g. `u-a3x7k2`) appended to redistributed messages, allowing admins to identify senders without exposing real identities
+- **Readable aliases** — each user gets a persistent two-word pseudonym (e.g. `golden_arrow`) that appears as a clickable link to the bot on every redistributed message
+- **Alias on every message** — text messages, photos, videos, animations, audio, documents, and voice messages all carry the sender's alias; stickers and video notes are excluded (no caption support)
 - **Mute (admin)** — `/mute <user_id|reply> <duration>` silences a user for a specified time (30m, 2h, 7d, etc.)
-- **Ban (admin)** — `/ban <user_id|reply>` permanently blocks a user and deletes all their redistributed messages
+- **Ban (admin)** — `/ban <user_id|reply>` permanently blocks a user with the choice to delete all their past messages or keep them
 - **Reply-based targeting** — all admin commands that accept a user ID also work by replying to a message
-- **Alias lookup** — `/whois <alias>` reveals the user behind a pseudonym and shows any active restrictions
+- **Alias lookup** — `/whois <name>` reveals the user behind a pseudonym and shows any active restrictions (spaces and underscores interchangeable)
 
 ### Deduplication
 - Content fingerprinting using `file_unique_id` (media) or SHA-256 (text)
@@ -139,6 +140,7 @@ python -m bot
 | `/subscribe [chat_id]` | Go Premium |
 | `/plan` | Check your current plan |
 | `/stats` | See how your chat is doing |
+| `/help` | Quick guide and command list |
 
 ### Admin Commands (restricted to `ADMIN_USER_IDS`)
 
@@ -157,9 +159,9 @@ python -m bot
 | `/revoke <chat_id\|reply>` | Remove someone's Premium |
 | `/mute <user_id\|reply> [duration]` | Temporarily silence a user |
 | `/unmute <user_id\|reply>` | Unsilence a user |
-| `/ban <user_id\|reply>` | Permanently block a user |
+| `/ban <user_id\|reply>` | Permanently block a user (with or without message deletion) |
 | `/unban <user_id\|reply>` | Unblock a user |
-| `/whois <alias>` | Look up who sent something |
+| `/whois <name>` | Look up a user by their alias name |
 
 ---
 
@@ -200,7 +202,8 @@ TelegramMediaHub/
 │   │   ├── media_group.py       # Album buffer + auto-flusher
 │   │   ├── signature.py         # Promotional signature appender
 │   │   ├── keyboards.py         # Centralized inline keyboard builders for all commands
-│   │   ├── alias.py             # Sender alias service (cached Redis lookup + formatting)
+│   │   ├── alias.py             # Sender alias service (cached Redis lookup + clickable link formatting)
+│   │   ├── alias_words.py       # Adjective/noun word lists for readable alias generation
 │   │   ├── moderation.py        # Restriction checks, duration parser, cache invalidation
 │   │   └── subscription.py      # Premium checks, nudges, trial reminders
 │   │
@@ -229,7 +232,8 @@ TelegramMediaHub/
 │       ├── 001_initial.py       # chats, bot_config, send_log tables
 │       ├── 002_subscriptions.py # subscriptions table
 │       ├── 003_send_log_dest_index.py  # Reverse-lookup index for reply threading
-│       └── 004_moderation.py    # user_aliases, user_restrictions + send_log.source_user_id
+│       ├── 004_moderation.py    # user_aliases, user_restrictions + send_log.source_user_id
+│       └── 005_readable_aliases.py  # Widen alias column + regenerate to two-word format
 │
 ├── docs/
 │   └── botfather-setup.md      # BotFather configuration guide

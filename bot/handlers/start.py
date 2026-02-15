@@ -17,6 +17,7 @@ from bot.db.repositories.send_log_repo import SendLogRepo
 from bot.db.repositories.subscription_repo import SubscriptionRepo
 from bot.services.keyboards import (
     build_broadcast_panel,
+    build_help_menu,
     build_main_menu,
     build_selfsend_result,
     build_stats_actions,
@@ -48,14 +49,54 @@ async def cmd_start(message: Message) -> None:
         )
 
     logger.info("Chat registered via /start: %d", chat.id)
+
+    # Resolve the user's alias for the welcome message
+    alias_line = ""
+    if message.from_user:
+        redis = _get_redis()
+        if redis:
+            from bot.services.alias import get_alias
+            alias = await get_alias(redis, message.from_user.id)
+            alias_line = (
+                f"\n\nYour tag is <b>{alias}</b> — it appears on your "
+                "messages across the network."
+            )
+
     await message.answer(
         "Hey! 👋 <b>This chat is now connected.</b>\n\n"
         "Anything you send here will show up in your other connected "
         "chats — and their messages will appear here. Everything looks "
         "like an original message, never a forward.\n\n"
-        "You have full access to everything. Explore the options below.",
+        f"You have full access to everything. Explore the options below.{alias_line}",
         reply_markup=build_main_menu(),
     )
+
+
+@start_router.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    """Show role-aware help with drill-down buttons."""
+    user_id = message.from_user.id if message.from_user else None
+    admin = _is_admin(user_id)
+
+    lines = [
+        "📖 <b>Help</b>",
+        "",
+        "I sync your messages across all your connected Telegram chats "
+        "— they arrive as originals, never as forwards.",
+        "",
+        "<b>Commands</b>",
+        "/start — Connect this chat",
+        "/stop — Disconnect this chat",
+        "/selfsend — Echo your own messages back",
+        "/broadcast — Control what you send and receive",
+        "/subscribe — Go Premium",
+        "/plan — Check your current plan",
+        "/stats — Your activity and stats",
+        "/help — This guide",
+    ]
+
+    kb = build_help_menu(admin)
+    await message.answer("\n".join(lines), reply_markup=kb)
 
 
 @start_router.message(Command("stop"))
@@ -196,26 +237,31 @@ def _is_admin(user_id: int | None) -> bool:
 
 
 @start_router.message(Command("stats"))
+@start_router.channel_post(Command("stats"))
 async def cmd_stats(message: Message) -> None:
     """Show per-chat stats for everyone; global stats appended for admins."""
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else None
     admin = _is_admin(user_id)
 
-    # ── Per-chat stats ───────────────────────────────────────────────
-    async with async_session() as session:
-        chat_repo = ChatRepo(session)
-        log_repo = SendLogRepo(session)
-        sub_repo = SubscriptionRepo(session)
+    try:
+        async with async_session() as session:
+            chat_repo = ChatRepo(session)
+            log_repo = SendLogRepo(session)
+            sub_repo = SubscriptionRepo(session)
 
-        chat = await chat_repo.get_chat(chat_id)
-        if chat is None:
-            await message.answer("This chat is not registered. Use /start first.")
-            return
+            chat = await chat_repo.get_chat(chat_id)
+            if chat is None:
+                await message.answer("This chat is not registered. Use /start first.")
+                return
 
-        sent_count = await log_repo.count_messages_from_chat(chat_id)
-        recv_count = await log_repo.count_messages_to_chat(chat_id)
-        active_sub = await sub_repo.get_active_subscription(chat_id)
+            sent_count = await log_repo.count_messages_from_chat(chat_id)
+            recv_count = await log_repo.count_messages_to_chat(chat_id)
+            active_sub = await sub_repo.get_active_subscription(chat_id)
+    except Exception as e:
+        logger.exception("Stats error for chat %d: %s", chat_id, e)
+        await message.answer("Stats are temporarily unavailable. Please try again in a bit.")
+        return
 
     # Chat name
     name = chat.title or chat.username or str(chat.chat_id)
@@ -231,20 +277,26 @@ async def cmd_stats(message: Message) -> None:
     if user_id:
         redis = _get_redis()
         if redis:
-            from bot.services.alias import get_alias
-            alias = await get_alias(redis, user_id)
-            alias_text = f"\nYour ID tag: <code>[{alias}]</code>"
+            try:
+                from bot.services.alias import get_alias
+                alias = await get_alias(redis, user_id)
+                alias_text = f"\nYour ID tag: <code>[{alias}]</code>"
+            except Exception as e:
+                logger.debug("Alias lookup failed for %d: %s", user_id, e)
 
     # Broadcast state
     src = "ON" if chat.is_source else "Paused"
     dst = "ON" if chat.is_destination else "Paused"
 
     # Plan one-liner
+    trial_left = get_trial_days_remaining(chat.registered_at)
     if active_sub:
-        remaining = (active_sub.expires_at - datetime.now(timezone.utc)).days
+        expires_at = active_sub.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        remaining = max(0, (expires_at - datetime.now(timezone.utc)).days)
         plan_line = f"Premium — {active_sub.plan.capitalize()} ({remaining}d left)"
     else:
-        trial_left = get_trial_days_remaining(chat.registered_at)
         if trial_left > 0:
             plan_line = f"Full access ({trial_left}d left)"
         else:
@@ -252,7 +304,7 @@ async def cmd_stats(message: Message) -> None:
 
     # Missed messages (only meaningful if trial expired and no sub)
     missed_line = ""
-    if not active_sub and get_trial_days_remaining(chat.registered_at) <= 0:
+    if not active_sub and trial_left <= 0:
         redis = _get_redis()
         if redis:
             from bot.services.subscription import get_missed_today
@@ -278,69 +330,84 @@ async def cmd_stats(message: Message) -> None:
         f"Plan: {plan_line}{missed_line}",
     ]
 
-    # ── Global stats (admin only) ────────────────────────────────────
+    # —— Global stats (admin only) --------------------------------------------------
     if admin:
-        async with async_session() as session:
-            chat_repo = ChatRepo(session)
-            sub_repo = SubscriptionRepo(session)
-            log_repo = SendLogRepo(session)
-            res_repo = RestrictionRepo(session)
+        try:
+            async with async_session() as session:
+                chat_repo = ChatRepo(session)
+                sub_repo = SubscriptionRepo(session)
+                log_repo = SendLogRepo(session)
+                res_repo = RestrictionRepo(session)
 
-            total_active = await chat_repo.count_active()
-            type_counts = await chat_repo.count_by_type()
-            source_count = await chat_repo.count_sources()
-            dest_count = await chat_repo.count_destinations()
-            premium_count = await sub_repo.count_premium_chats()
-            sub_breakdown = await sub_repo.count_subscription_breakdown()
-            total_dist = await log_repo.count_total_distributed()
-            unique_senders = await log_repo.count_unique_senders()
-            restrictions = await res_repo.count_active_restrictions()
+                total_active = await chat_repo.count_active()
+                type_counts = await chat_repo.count_by_type()
+                source_count = await chat_repo.count_sources()
+                dest_count = await chat_repo.count_destinations()
+                premium_count = await sub_repo.count_premium_chats()
+                sub_breakdown = await sub_repo.count_subscription_breakdown()
+                total_dist = await log_repo.count_total_distributed()
+                unique_senders = await log_repo.count_unique_senders()
+                restrictions = await res_repo.count_active_restrictions()
 
-        # Trial vs expired: active - premium = non-premium active chats
-        non_premium = total_active - premium_count
+            # Trial vs expired: active - premium = non-premium active chats
+            non_premium = max(0, total_active - premium_count)
 
-        # Type breakdown line
-        type_parts = []
-        for t in ("private", "group", "supergroup", "channel"):
-            c = type_counts.get(t, 0)
-            if c > 0:
-                type_parts.append(f"{t.capitalize()}: {c}")
-        type_line = " | ".join(type_parts) if type_parts else "None"
+            # Type breakdown line
+            type_parts = []
+            for t in ("private", "group", "supergroup", "channel"):
+                c = type_counts.get(t, 0)
+                if c > 0:
+                    type_parts.append(f"{t.capitalize()}: {c}")
+            type_line = " | ".join(type_parts) if type_parts else "None"
 
-        # Sub breakdown line
-        sub_parts = []
-        for p in ("week", "month", "year"):
-            c = sub_breakdown.get(p, 0)
-            if c > 0:
-                sub_parts.append(f"{p.capitalize()}: {c}")
-        sub_line = " | ".join(sub_parts) if sub_parts else "None"
+            # Sub breakdown line
+            sub_parts = []
+            for p in ("week", "month", "year"):
+                c = sub_breakdown.get(p, 0)
+                if c > 0:
+                    sub_parts.append(f"{p.capitalize()}: {c}")
+            sub_line = " | ".join(sub_parts) if sub_parts else "None"
 
-        muted = restrictions.get("mute", 0)
-        banned = restrictions.get("ban", 0)
+            muted = restrictions.get("mute", 0)
+            banned = restrictions.get("ban", 0)
 
-        from bot.services.distributor import get_distributor
-        queue_size = get_distributor().queue_size
+            try:
+                from bot.services.distributor import get_distributor
+                queue_size = get_distributor().queue_size
+            except Exception as e:
+                logger.debug("Queue size unavailable: %s", e)
+                queue_size = "N/A"
 
-        lines.extend([
-            "",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            "",
-            "<b>Network Overview</b>",
-            "",
-            f"Connected chats: <b>{total_active}</b>",
-            f"  {type_line}",
-            f"  Sending: {source_count} | Receiving: {dest_count}",
-            "",
-            f"Premium members: <b>{premium_count}</b> | Free: {non_premium}",
-            f"  ({sub_line})",
-            "",
-            "<b>Last 48 hours:</b>",
-            f"  Messages synced: <b>{total_dist:,}</b>",
-            f"  Active senders: <b>{unique_senders}</b>",
-            "",
-            f"Moderation: {muted} silenced · {banned} blocked",
-            f"Queue: {queue_size}",
-        ])
+            lines.extend([
+                "",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                "",
+                "<b>Network Overview</b>",
+                "",
+                f"Connected chats: <b>{total_active}</b>",
+                f"  {type_line}",
+                f"  Sending: {source_count} | Receiving: {dest_count}",
+                "",
+                f"Premium members: <b>{premium_count}</b> | Free: {non_premium}",
+                f"  ({sub_line})",
+                "",
+                "<b>Last 48 hours:</b>",
+                f"  Messages synced: <b>{total_dist:,}</b>",
+                f"  Active senders: <b>{unique_senders}</b>",
+                "",
+                f"Moderation: {muted} silenced · {banned} blocked",
+                f"Queue: {queue_size}",
+            ])
+        except Exception as e:
+            logger.exception("Stats error (admin global): %s", e)
+            lines.extend([
+                "",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                "",
+                "<b>Network Overview</b>",
+                "",
+                "Stats are temporarily unavailable.",
+            ])
 
     kb = build_stats_actions(admin)
     await message.answer("\n".join(lines), reply_markup=kb)

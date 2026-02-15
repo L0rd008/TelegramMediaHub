@@ -14,6 +14,8 @@ from bot.services.keyboards import (
     build_chat_list_nav,
     build_edits_panel,
     build_grant_plans,
+    build_help_back,
+    build_help_menu,
     build_main_menu,
     build_moderation_actions,
     build_mute_presets,
@@ -232,7 +234,8 @@ def test_mute_presets_has_four_durations():
 def test_ban_confirm():
     kb = build_ban_confirm(user_id=42)
     data = _all_callback_data(kb)
-    assert "bny:42" in data
+    assert "byd:42" in data  # ban + delete
+    assert "byn:42" in data  # ban only
     assert "noop" in data
 
 
@@ -328,6 +331,39 @@ def test_plan_trial_actions():
     assert "sub:show" in data
 
 
+# ── Help menu ────────────────────────────────────────────────────────
+
+
+def test_help_menu_regular_user():
+    kb = build_help_menu(is_admin=False)
+    data = _all_callback_data(kb)
+    assert "help:how" in data
+    assert "help:prem" in data
+    assert "help:admin" not in data
+
+
+def test_help_menu_admin():
+    kb = build_help_menu(is_admin=True)
+    data = _all_callback_data(kb)
+    assert "help:how" in data
+    assert "help:prem" in data
+    assert "help:admin" in data
+
+
+def test_help_back_regular_user():
+    kb = build_help_back(is_admin=False)
+    data = _all_callback_data(kb)
+    assert "help:back" in data
+    assert "help:admin" not in data
+
+
+def test_help_back_admin():
+    kb = build_help_back(is_admin=True)
+    data = _all_callback_data(kb)
+    assert "help:back" in data
+    assert "help:admin" in data
+
+
 # ── Callback data length ────────────────────────────────────────────
 
 
@@ -356,6 +392,10 @@ def test_all_callback_data_within_64_bytes():
         build_admin_panel(),
         build_plan_active_actions(),
         build_plan_trial_actions(),
+        build_help_menu(True),
+        build_help_menu(False),
+        build_help_back(True),
+        build_help_back(False),
     ]
     for kb in keyboards:
         for data in _all_callback_data(kb):

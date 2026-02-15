@@ -31,6 +31,18 @@ logger = logging.getLogger(__name__)
 TEXT_MAX_LEN = 4096
 CAPTION_MAX_LEN = 1024
 
+# Cached bot username (resolved once on first send)
+_bot_username_cache: str = ""
+
+
+async def _get_bot_username(bot: Bot) -> str:
+    """Return the bot's username, caching after the first API call."""
+    global _bot_username_cache
+    if not _bot_username_cache:
+        info = await bot.get_me()
+        _bot_username_cache = info.username or ""
+    return _bot_username_cache
+
 
 def _rebuild_entities(raw: list[dict[str, Any]] | None) -> list[MessageEntity] | None:
     """Rebuild MessageEntity objects from serialized dicts."""
@@ -75,10 +87,15 @@ async def send_single(
     alias_tag = ""
     if sender_alias:
         from bot.services.alias import format_alias_tag
-        alias_tag = format_alias_tag(sender_alias)
+        bot_uname = await _get_bot_username(bot)
+        alias_tag = format_alias_tag(sender_alias, bot_uname)
 
-    raw_text = _append_alias(msg.text, alias_tag) if alias_tag and msg.text else msg.text
-    raw_caption = _append_alias(msg.caption, alias_tag) if alias_tag and msg.caption else msg.caption
+    if alias_tag:
+        raw_text = f"{msg.text}\n\n{alias_tag}" if msg.text else msg.text
+        raw_caption = f"{msg.caption}\n\n{alias_tag}" if msg.caption else alias_tag
+    else:
+        raw_text = msg.text
+        raw_caption = msg.caption
 
     caption = apply_signature(raw_caption, signature, CAPTION_MAX_LEN)
     text = apply_signature(raw_text, signature, TEXT_MAX_LEN)
@@ -245,14 +262,18 @@ async def send_media_group(
     alias_tag = ""
     if sender_alias:
         from bot.services.alias import format_alias_tag
-        alias_tag = format_alias_tag(sender_alias)
+        bot_uname = await _get_bot_username(bot)
+        alias_tag = format_alias_tag(sender_alias, bot_uname)
 
     first_result = None
     for group in groups:
         input_media = []
         for i, item in enumerate(group):
             # Only first item in the group gets caption + alias + signature
-            raw_cap = _append_alias(item.caption, alias_tag) if (i == 0 and alias_tag and item.caption) else item.caption
+            if i == 0 and alias_tag:
+                raw_cap = f"{item.caption}\n\n{alias_tag}" if item.caption else alias_tag
+            else:
+                raw_cap = item.caption
             cap = apply_signature(raw_cap, signature, CAPTION_MAX_LEN) if i == 0 else (item.caption if i > 0 else None)
             cap_entities = _rebuild_entities(item.caption_entities) if i == 0 else None
 

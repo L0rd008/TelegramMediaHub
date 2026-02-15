@@ -317,20 +317,24 @@ async def test_get_dest_messages_by_user_empty():
 # ── Sender alias integration ─────────────────────────────────────────
 
 
-def test_append_alias_to_text():
-    """_append_alias should add alias tag to text content."""
-    from bot.services.sender import _append_alias
+def test_build_alias_entity_found():
+    """_build_alias_entity should return a text_link entity when alias is in content."""
+    from bot.services.sender import _build_alias_entity
 
-    result = _append_alias("Hello world", "<code>[u-abc123]</code>")
-    assert result == "Hello world\n\n<code>[u-abc123]</code>"
+    ent = _build_alias_entity("Hello world\n\ngolden_arrow", "golden_arrow", "https://t.me/Bot")
+    assert ent is not None
+    assert ent.type == "text_link"
+    assert ent.url == "https://t.me/Bot"
+    assert ent.offset == len("Hello world\n\n")
+    assert ent.length == len("golden_arrow")
 
 
-def test_append_alias_none_content():
-    """_append_alias should return None for None content."""
-    from bot.services.sender import _append_alias
+def test_build_alias_entity_not_found():
+    """_build_alias_entity should return None when alias is not in content."""
+    from bot.services.sender import _build_alias_entity
 
-    result = _append_alias(None, "<code>[u-abc123]</code>")
-    assert result is None
+    ent = _build_alias_entity("Hello world", "golden_arrow", "https://t.me/Bot")
+    assert ent is None
 
 
 # ── RestrictionRepo ──────────────────────────────────────────────────

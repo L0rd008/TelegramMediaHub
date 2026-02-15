@@ -97,11 +97,19 @@ class RestrictionRepo:
 
         Returns e.g. {"mute": 2, "ban": 5}. Expired mutes are excluded.
         """
+        from sqlalchemy import or_
+
         now = datetime.now(timezone.utc)
         result = await self._s.execute(
             select(UserRestriction.restriction_type, func.count())
             .where(
                 UserRestriction.active == True,  # noqa: E712
+                # Exclude expired mutes: keep bans (expires_at IS NULL) and
+                # restrictions whose expiry is in the future.
+                or_(
+                    UserRestriction.expires_at.is_(None),
+                    UserRestriction.expires_at > now,
+                ),
             )
             .group_by(UserRestriction.restriction_type)
         )

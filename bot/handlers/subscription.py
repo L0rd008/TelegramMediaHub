@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
@@ -72,7 +73,10 @@ async def cmd_plan(message: Message) -> None:
         return
 
     if active_sub:
-        remaining = (active_sub.expires_at - active_sub.starts_at).days
+        expires_at = active_sub.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        remaining = max(0, (expires_at - datetime.now(timezone.utc)).days)
         src = "ON" if chat.is_source else "Paused"
         dst = "ON" if chat.is_destination else "Paused"
         lines = [

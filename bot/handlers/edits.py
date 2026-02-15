@@ -43,6 +43,19 @@ async def _handle_edit(message: Message) -> None:
     if edit_mode != "resend":
         return  # Edit redistribution is off
 
+    # Check user restrictions (mute/ban) – drop edits from restricted users
+    user_id = message.from_user.id if message.from_user else None
+    if user_id:
+        try:
+            from bot.services.moderation import is_user_restricted
+
+            distributor = get_distributor()
+            if await is_user_restricted(distributor._redis, user_id):
+                logger.debug("Dropping edit from restricted user %d", user_id)
+                return
+        except RuntimeError:
+            pass  # Distributor not initialized yet
+
     # Normalize and redistribute as a new message
     normalized = normalize(message)
     if normalized is None:

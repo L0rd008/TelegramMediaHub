@@ -77,7 +77,7 @@ class SubscriptionRepo:
         """
         now = datetime.now(timezone.utc)
         # Chat.registered_at is stored without tzinfo, so use naive UTC bounds.
-        target_date = datetime.utcnow() + timedelta(days=days_before)
+        target_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=days_before)
         trial_offset = timedelta(days=settings.TRIAL_DAYS)
 
         # Trial expiry = registered_at + TRIAL_DAYS
@@ -89,7 +89,10 @@ class SubscriptionRepo:
         # Exclude chats that already have a paid subscription
         has_sub = (
             select(Subscription.chat_id)
-            .where(Subscription.expires_at > now)
+            .where(
+                Subscription.chat_id == Chat.chat_id,
+                Subscription.expires_at > now,
+            )
             .correlate(Chat)
             .exists()
         )

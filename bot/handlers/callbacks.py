@@ -130,7 +130,10 @@ async def cb_myplan(callback: CallbackQuery) -> None:
     from bot.services.subscription import build_subscribe_button, get_trial_days_remaining
 
     if sub:
-        remaining = (sub.expires_at - sub.starts_at).days
+        _exp = sub.expires_at
+        if _exp.tzinfo is None:
+            _exp = _exp.replace(tzinfo=timezone.utc)
+        remaining = max(0, (_exp - datetime.now(timezone.utc)).days)
         src = "ON" if chat.is_source else "Paused"
         dst = "ON" if chat.is_destination else "Paused"
         text = (

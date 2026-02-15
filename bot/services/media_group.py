@@ -134,6 +134,7 @@ class MediaGroupBuffer:
             message_type=MessageType.MEDIA_GROUP,
             source_chat_id=items[0].source_chat_id,
             source_message_id=items[0].source_message_id,
+            source_user_id=items[0].source_user_id,
             media_group_id=media_group_id,
             group_items=items,
         )

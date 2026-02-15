@@ -16,6 +16,7 @@ from bot.db.repositories.alias_repo import AliasRepo
 from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.config_repo import ConfigRepo
 from bot.db.repositories.restriction_repo import RestrictionRepo
+from bot.db.repositories.send_log_repo import SendLogRepo
 from bot.db.repositories.subscription_repo import SubscriptionRepo
 from bot.services.distributor import get_distributor
 from bot.services.keyboards import (

@@ -66,11 +66,16 @@ def _rebuild_entities(raw: list[dict[str, Any]] | None) -> list[MessageEntity] |
     return entities or None
 
 
-def _append_alias(content: str | None, alias_tag: str) -> str | None:
-    """Append the sender alias tag to text/caption if content exists."""
-    if content is None:
+def _build_alias_entity(
+    content: str, alias_plain: str, alias_url: str
+) -> MessageEntity | None:
+    """Find the alias in *content* and return a text_link MessageEntity for it."""
+    idx = content.rfind(alias_plain)
+    if idx < 0:
         return None
-    return f"{content}\n\n{alias_tag}"
+    return MessageEntity(
+        type="text_link", offset=idx, length=len(alias_plain), url=alias_url
+    )
 
 
 async def send_single(
@@ -83,16 +88,17 @@ async def send_single(
 ) -> Message | None:
     """Send a single NormalizedMessage to *chat_id*. Returns the sent Message."""
 
-    # Apply alias tag before signature (alias is part of the content)
-    alias_tag = ""
+    # Resolve alias as plain text + URL (never HTML — avoids entity/parse_mode conflict)
+    alias_plain = ""
+    alias_url = ""
     if sender_alias:
-        from bot.services.alias import format_alias_tag
         bot_uname = await _get_bot_username(bot)
-        alias_tag = format_alias_tag(sender_alias, bot_uname)
+        alias_plain = sender_alias
+        alias_url = f"https://t.me/{bot_uname}" if bot_uname else ""
 
-    if alias_tag:
-        raw_text = f"{msg.text}\n\n{alias_tag}" if msg.text else msg.text
-        raw_caption = f"{msg.caption}\n\n{alias_tag}" if msg.caption else alias_tag
+    if alias_plain:
+        raw_text = f"{msg.text}\n\n{alias_plain}" if msg.text else msg.text
+        raw_caption = f"{msg.caption}\n\n{alias_plain}" if msg.caption else alias_plain
     else:
         raw_text = msg.text
         raw_caption = msg.caption
@@ -101,6 +107,18 @@ async def send_single(
     text = apply_signature(raw_text, signature, TEXT_MAX_LEN)
     entities = _rebuild_entities(msg.entities)
     caption_entities = _rebuild_entities(msg.caption_entities)
+
+    # Append a text_link entity for the alias so it renders as a clickable link
+    # regardless of whether the original message had entities.
+    if alias_plain and alias_url:
+        if text:
+            ent = _build_alias_entity(text, alias_plain, alias_url)
+            if ent:
+                entities = (entities or []) + [ent]
+        if caption:
+            ent = _build_alias_entity(caption, alias_plain, alias_url)
+            if ent:
+                caption_entities = (caption_entities or []) + [ent]
 
     # Build reply_parameters if we have a reply target
     reply_params: ReplyParameters | None = None
@@ -258,24 +276,31 @@ async def send_media_group(
     # Group items by compatible types
     groups = _split_by_compatibility(msg.group_items)
 
-    # Prepare alias tag for first item caption
-    alias_tag = ""
+    # Resolve alias as plain text + URL (entity-based, never HTML)
+    alias_plain = ""
+    alias_url = ""
     if sender_alias:
-        from bot.services.alias import format_alias_tag
         bot_uname = await _get_bot_username(bot)
-        alias_tag = format_alias_tag(sender_alias, bot_uname)
+        alias_plain = sender_alias
+        alias_url = f"https://t.me/{bot_uname}" if bot_uname else ""
 
     first_result = None
     for group in groups:
         input_media = []
         for i, item in enumerate(group):
             # Only first item in the group gets caption + alias + signature
-            if i == 0 and alias_tag:
-                raw_cap = f"{item.caption}\n\n{alias_tag}" if item.caption else alias_tag
+            if i == 0 and alias_plain:
+                raw_cap = f"{item.caption}\n\n{alias_plain}" if item.caption else alias_plain
             else:
                 raw_cap = item.caption
             cap = apply_signature(raw_cap, signature, CAPTION_MAX_LEN) if i == 0 else (item.caption if i > 0 else None)
             cap_entities = _rebuild_entities(item.caption_entities) if i == 0 else None
+
+            # Add alias entity to the first item's caption
+            if i == 0 and alias_plain and alias_url and cap:
+                ent = _build_alias_entity(cap, alias_plain, alias_url)
+                if ent:
+                    cap_entities = (cap_entities or []) + [ent]
 
             match item.message_type:
                 case MessageType.PHOTO:
@@ -336,7 +361,10 @@ async def send_media_group(
                     )
                 case _:
                     # Fallback: send as individual message
-                    await send_single(bot, item, chat_id, signature if i == 0 else None)
+                    await send_single(
+                        bot, item, chat_id, signature if i == 0 else None,
+                        sender_alias=sender_alias if i == 0 else None,
+                    )
                     continue
 
         # Build reply_parameters for media groups
@@ -361,7 +389,10 @@ async def send_media_group(
                     first_result = result[0]
         elif len(input_media) == 1:
             # Single item after splitting – send individually
-            result = await send_single(bot, group[0], chat_id, signature)
+            result = await send_single(
+                bot, group[0], chat_id, signature,
+                sender_alias=sender_alias,
+            )
             if first_result is None:
                 first_result = result
 

@@ -249,9 +249,21 @@ class Distributor:
                 await self._queue.put(task)
 
         except TelegramBadRequest as e:
-            error_msg = str(e)
-            if "chat not found" in error_msg.lower():
-                logger.warning("Chat %d not found – deactivating", task.dest_chat_id)
+            error_msg = str(e).lower()
+            # Permanent failures: chat gone, private, or bot kicked → deactivate
+            _permanent = (
+                "chat not found" in error_msg
+                or "channel_private" in error_msg
+                or "bot was kicked" in error_msg
+                or "have no rights to send" in error_msg
+                or "chat_write_forbidden" in error_msg
+            )
+            if _permanent:
+                logger.warning(
+                    "Permanent failure for chat %d – deactivating: %s",
+                    task.dest_chat_id,
+                    error_msg,
+                )
                 async with async_session() as session:
                     repo = ChatRepo(session)
                     await repo.deactivate_chat(task.dest_chat_id)

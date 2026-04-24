@@ -143,14 +143,24 @@ class MediaGroupBuffer:
             len(items),
         )
 
-        # Create a composite NormalizedMessage of type MEDIA_GROUP
+        # Create a composite NormalizedMessage of type MEDIA_GROUP.
+        # Bug 1 fix: propagate reply threading context from the first item.
+        # All items in a Telegram album share the same reply_to_message, so
+        # taking reply_source_* from items[0] is correct and sufficient.
+        # These fields are now populated by _handle_content (which runs reply
+        # detection BEFORE buffering), so they survive the Redis round-trip.
         composite = NormalizedMessage(
             message_type=MessageType.MEDIA_GROUP,
             source_chat_id=items[0].source_chat_id,
             source_message_id=items[0].source_message_id,
             source_user_id=items[0].source_user_id,
+            source_chat_title=items[0].source_chat_title,
+            source_chat_username=items[0].source_chat_username,
             media_group_id=media_group_id,
             group_items=items,
+            # Reply threading – resolved in _handle_content before buffering
+            reply_source_chat_id=items[0].reply_source_chat_id,
+            reply_source_message_id=items[0].reply_source_message_id,
         )
 
         # Distribute

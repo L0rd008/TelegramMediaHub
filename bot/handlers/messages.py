@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.types import Message, MessageOriginChannel
 
 from bot.db.engine import async_session
 from bot.db.repositories.chat_repo import ChatRepo
@@ -24,6 +24,63 @@ logger = logging.getLogger(__name__)
 
 messages_router = Router(name="messages")
 
+
+# ── Bug 5: Auto-forward handler ───────────────────────────────────────────────
+# When the bot sends a message to a channel, Telegram automatically forwards
+# it to the channel's linked discussion group.  The bot never explicitly sent
+# to the discussion group, so no send_log row exists for that chat.
+# When a user in the discussion group replies to that auto-forwarded post,
+# reverse_lookup(discussion_group_id, message_id) returns None and reply
+# threading silently fails.
+#
+# Fix: when we receive an is_automatic_forward=True message we look up the
+# channel entry in send_log to find the original (source_chat, source_msg),
+# then insert a secondary row mapping that source to the discussion group
+# message.  After this, reply threading works in one step for all dests.
+#
+# This handler MUST be registered before the generic on_message handler so
+# that auto-forwarded messages are intercepted here and not re-distributed.
+@messages_router.message(F.is_automatic_forward == True)  # noqa: E712
+async def on_auto_forward(message: Message) -> None:
+    """Log auto-forwarded channel posts to discussion groups for reply threading."""
+    try:
+        forward_origin = message.forward_origin
+        if not isinstance(forward_origin, MessageOriginChannel):
+            return
+
+        channel_id: int = forward_origin.chat.id
+        channel_msg_id: int = forward_origin.message_id
+        discussion_group_id: int = message.chat.id
+        discussion_group_msg_id: int = message.message_id
+
+        async with async_session() as session:
+            sl_repo = SendLogRepo(session)
+            # Was this channel post one we redistributed?
+            origin = await sl_repo.reverse_lookup(channel_id, channel_msg_id)
+            if origin is None:
+                return  # Not our message – ignore
+
+            source_chat_id, source_message_id = origin
+            # Insert secondary mapping: original source → discussion group
+            await sl_repo.log_send(
+                source_chat_id=source_chat_id,
+                source_message_id=source_message_id,
+                source_user_id=None,
+                dest_chat_id=discussion_group_id,
+                dest_message_id=discussion_group_msg_id,
+            )
+            logger.debug(
+                "Auto-forward mapped: channel (%d, %d) -> discussion (%d, %d) "
+                "← original source (%d, %d)",
+                channel_id, channel_msg_id,
+                discussion_group_id, discussion_group_msg_id,
+                source_chat_id, source_message_id,
+            )
+    except Exception as e:
+        logger.debug("Auto-forward mapping error: %s", e)
+
+
+# ── Standard content handlers ─────────────────────────────────────────────────
 
 # Handler for regular messages
 @messages_router.message(
@@ -83,7 +140,49 @@ async def _handle_content(message: Message) -> None:
     distributor = get_distributor()
     redis = distributor._redis  # Use the same Redis instance
 
-    # 4. Media group handling
+    # ── Step 4 (moved up): Reply detection ───────────────────────────────────
+    # Bug 1 fix: reply detection MUST run for ALL message types — including
+    # album items — before the media-group branch returns early.
+    # Previously this block was AFTER the media-group return, so album replies
+    # were never threaded.  We need bot_info here, so fetch it once and reuse.
+    bot_info = await bot.get_me()
+    reply = message.reply_to_message
+    if reply:
+        # Only thread if the replied-to message was bot-sent.
+        # from_user is None for channel posts redistributed by the bot, so we
+        # treat that as a candidate too (passes the "is bot" test implicitly).
+        is_bot_reply = (
+            reply.from_user is None
+            or reply.from_user.id == bot_info.id
+        )
+        if is_bot_reply:
+            try:
+                async with async_session() as session:
+                    sl_repo = SendLogRepo(session)
+                    origin = await sl_repo.reverse_lookup(
+                        message.chat.id, reply.message_id
+                    )
+                if origin:
+                    normalized.reply_source_chat_id = origin[0]
+                    normalized.reply_source_message_id = origin[1]
+                    logger.debug(
+                        "Reply detected: msg %d replies to bot msg %d → source (%d, %d)",
+                        message.message_id,
+                        reply.message_id,
+                        origin[0],
+                        origin[1],
+                    )
+            except Exception as e:
+                logger.debug(
+                    "Reply reverse-lookup failed for msg %d: %s",
+                    reply.message_id,
+                    e,
+                )
+
+    # 5. Media group handling
+    # Reply fields (reply_source_chat_id / reply_source_message_id) are now
+    # populated on `normalized` before buffering, so _flush_group can propagate
+    # them to the composite NormalizedMessage.
     if normalized.media_group_id:
         # Mark this media_group_id as seen (24h TTL in Redis).
         await is_media_group_seen(redis, normalized.media_group_id)
@@ -110,37 +209,10 @@ async def _handle_content(message: Message) -> None:
         await buffer.add(normalized)
         return  # Will be flushed as a group later
 
-    # 5. Dedup check
-    bot_info = await bot.get_me()
+    # 6. Dedup check (bot_info already fetched above)
     if await is_duplicate(redis, normalized, bot_info.id):
         logger.debug("Dropping duplicate message %d", message.message_id)
         return
 
-    # 5b. Reply detection – if the user replied to a bot message, resolve the
-    #     original source via send_log so the distributor can thread replies.
-    reply = message.reply_to_message
-    if reply:
-        should_check = True
-        if reply.from_user and reply.from_user.id != bot_info.id:
-            should_check = False
-        if should_check:
-            try:
-                async with async_session() as session:
-                    sl_repo = SendLogRepo(session)
-                    origin = await sl_repo.reverse_lookup(message.chat.id, reply.message_id)
-                if origin:
-                    normalized.reply_source_chat_id = origin[0]
-                    normalized.reply_source_message_id = origin[1]
-                    logger.debug(
-                        "Reply detected: msg %d replies to bot msg %d -> source (%d, %d)",
-                        message.message_id,
-                        reply.message_id,
-                        origin[0],
-                        origin[1],
-                    )
-            except Exception as e:
-                logger.debug("Reply reverse-lookup failed for %d: %s", reply.message_id, e)
-
-    # 6. Distribute
-
+    # 7. Distribute
     await distributor.distribute(normalized)

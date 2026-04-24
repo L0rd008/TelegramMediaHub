@@ -12,6 +12,29 @@ class SendLogRepo:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
+    async def log_send(
+        self,
+        source_chat_id: int,
+        source_message_id: int,
+        source_user_id: int | None,
+        dest_chat_id: int,
+        dest_message_id: int,
+    ) -> None:
+        """Insert one send_log row.
+
+        Used by the auto-forward handler (Bug 5) and any other code that needs
+        to log a bot-sent message outside the normal distributor path.
+        """
+        log = SendLog(
+            source_chat_id=source_chat_id,
+            source_message_id=source_message_id,
+            source_user_id=source_user_id,
+            dest_chat_id=dest_chat_id,
+            dest_message_id=dest_message_id,
+        )
+        self._s.add(log)
+        await self._s.commit()
+
     async def reverse_lookup(
         self, dest_chat_id: int, dest_message_id: int
     ) -> tuple[int, int] | None:

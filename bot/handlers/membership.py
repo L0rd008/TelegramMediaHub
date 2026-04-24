@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 
+from aiogram.enums import ParseMode
 from aiogram import F, Router
 from aiogram.types import ChatMemberUpdated, Message
 
@@ -72,6 +73,7 @@ async def on_my_chat_member(event: ChatMemberUpdated) -> None:
                     "<b>Connected!</b> This chat is now part of your network.\n\n"
                     "Messages sent here will sync to your other chats, "
                     "and vice versa. Tap /stop to disconnect.",
+                    parse_mode=ParseMode.HTML,
                 )
             except Exception:
                 pass  # Can't send to some chat types

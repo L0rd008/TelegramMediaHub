@@ -75,6 +75,8 @@ def _entities_to_dicts(entities: list[MessageEntity] | None) -> list[dict[str, A
             d["language"] = e.language
         if e.custom_emoji_id:
             d["custom_emoji_id"] = e.custom_emoji_id
+        # M-1: Preserve expandable_blockquote (introduced in Bot API 9.3).
+        # No extra fields needed — the type string carries the semantic.
         result.append(d)
     return result
 
@@ -221,8 +223,12 @@ def normalize(message: Message) -> NormalizedMessage | None:
         )
 
     # ── Unsupported ───────────────────────────────────────────────────
+    # M-1: Log the content_type so operators can see what is being dropped.
+    # Common drops: polls, checklists, dice, game, location, contact, sticker packs.
+    content_type = getattr(message, "content_type", "unknown")
     logger.debug(
-        "Skipping unsupported message %d in chat %d",
+        "Skipping unsupported message type '%s' (id=%d, chat=%d)",
+        content_type,
         message.message_id,
         message.chat.id,
     )

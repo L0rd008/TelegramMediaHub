@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
+from aiogram.enums import ParseMode
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -64,10 +65,12 @@ async def is_premium(
     if cached is not None:
         return cached == "1"
 
-    # Check trial first
+    # Check trial first — M-5: normalise registered_at to UTC in-place before
+    # computing trial_end, avoiding a confusingly overwritten variable.
     now = datetime.now(timezone.utc)
-    trial_end = registered_at.replace(tzinfo=timezone.utc) if registered_at.tzinfo is None else registered_at
-    trial_end = trial_end + timedelta(days=settings.TRIAL_DAYS)
+    if registered_at.tzinfo is None:
+        registered_at = registered_at.replace(tzinfo=timezone.utc)
+    trial_end = registered_at + timedelta(days=settings.TRIAL_DAYS)
     if now < trial_end:
         await redis.set(cache_key, "1", ex=CACHE_TTL)
         return True
@@ -252,12 +255,19 @@ class TrialReminderTask:
                 chats = await repo.get_expiring_trials(days_before)
 
             for chat in chats:
-                if chat.chat_id in settings.admin_ids:
-                    continue
-                # Avoid sending duplicates using Redis
-                dedup_key = f"trial_remind:{chat.chat_id}:{days_before}"
-                if await self._redis.set(dedup_key, "1", ex=86_400 * 2, nx=True):
-                    await self._send_single_reminder(chat.chat_id, days_before)
+                # L-4: Propagate CancelledError so shutdown is not delayed.
+                # The outer _loop() already catches CancelledError before Exception.
+                try:
+                    if chat.chat_id in settings.admin_ids:
+                        continue
+                    # Avoid sending duplicates using Redis
+                    dedup_key = f"trial_remind:{chat.chat_id}:{days_before}"
+                    if await self._redis.set(dedup_key, "1", ex=86_400 * 2, nx=True):
+                        await self._send_single_reminder(chat.chat_id, days_before)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.debug("Failed sending reminder to chat %d: %s", chat.chat_id, e)
 
     async def _send_single_reminder(self, chat_id: int, days_left: int) -> None:
         if days_left == 1:
@@ -288,6 +298,7 @@ class TrialReminderTask:
                 chat_id,
                 text,
                 reply_markup=build_subscribe_button(),
+                parse_mode=ParseMode.HTML,
             )
             logger.info("Sent %d-day trial reminder to chat %d", days_left, chat_id)
         except Exception as e:

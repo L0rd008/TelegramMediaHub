@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
 from aiogram import Bot
+from aiogram.enums import ParseMode
 from aiogram.exceptions import (
     TelegramBadRequest,
     TelegramForbiddenError,
@@ -32,6 +34,10 @@ from bot.services.signature import apply_signature
 
 logger = logging.getLogger(__name__)
 
+# M-4: Redis key and TTL for the cached signature config
+_SIGNATURE_CACHE_KEY = "config:signature_cache"
+_SIGNATURE_CACHE_TTL = 30  # seconds — short so admin changes propagate quickly
+
 
 @dataclass
 class SendTask:
@@ -45,13 +51,20 @@ class SendTask:
 
 
 class Distributor:
-    """Fan-out engine with async worker pool."""
+    """Fan-out engine with async worker pool.
+
+    M-3 / L-3 note: The singleton is initialised eagerly in app.py's _on_startup()
+    before any handlers are registered. The ordering guarantee is enforced by the
+    startup lifecycle — do not call get_distributor() before startup completes.
+    """
 
     def __init__(self, bot: Bot, redis: aioredis.Redis) -> None:
         self._bot = bot
         self._redis = redis
         self._queue: asyncio.Queue[SendTask] = asyncio.Queue()
         self._workers: list[asyncio.Task] = []
+        # H-5: track fire-and-forget tasks to prevent premature GC
+        self._background_tasks: set[asyncio.Task] = set()
         self._rate_limiter = RateLimiter(redis, settings.GLOBAL_RATE_LIMIT)
         self._running = False
 
@@ -72,6 +85,10 @@ class Distributor:
         # Wait for workers to finish
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
+        # Cancel any remaining background tasks
+        for t in list(self._background_tasks):
+            t.cancel()
+        self._background_tasks.clear()
         logger.info("All workers stopped.")
 
     async def distribute(self, msg: NormalizedMessage) -> None:
@@ -106,9 +123,7 @@ class Distributor:
 
                     # Send a nudge at most once per day
                     if await should_nudge(self._redis, dest.chat_id):
-                        asyncio.create_task(
-                            self._send_paywall_nudge(dest.chat_id)
-                        )
+                        self._fire_background(self._send_paywall_nudge(dest.chat_id))
                     continue  # Skip this destination
 
             # ── Reply threading: resolve per-destination ─────────
@@ -140,8 +155,24 @@ class Distributor:
                 )
             )
 
+    def _fire_background(self, coro) -> None:
+        """H-5: Schedule a background coroutine and track it to prevent GC.
+
+        The task is automatically removed from the tracking set on completion,
+        and any unhandled exceptions are logged at DEBUG level.
+        """
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+
+        def _done_cb(t: asyncio.Task) -> None:
+            self._background_tasks.discard(t)
+            if not t.cancelled() and t.exception():
+                logger.debug("Background task error: %s", t.exception())
+
+        task.add_done_callback(_done_cb)
+
     async def _send_paywall_nudge(self, chat_id: int) -> None:
-        """Fire-and-forget: send a tasteful upgrade nudge to a chat."""
+        """Send a tasteful upgrade nudge to a chat."""
         from bot.services.subscription import build_subscribe_button, get_missed_today
 
         try:
@@ -155,6 +186,7 @@ class Distributor:
                 chat_id,
                 text,
                 reply_markup=build_subscribe_button(),
+                parse_mode=ParseMode.HTML,
             )
         except Exception as e:
             logger.debug("Failed to send paywall nudge to %d: %s", chat_id, e)
@@ -182,7 +214,10 @@ class Distributor:
             # Acquire rate limit slot
             await self._rate_limiter.acquire(task.dest_chat_id, task.dest_chat_type)
 
-            # Build signature
+            # H-1: Read allow_paid_broadcast from config (cached in Redis via _get_signature)
+            allow_paid = await self._get_allow_paid_broadcast()
+
+            # Build signature (M-4: Redis-cached to avoid per-message DB reads)
             signature = await self._get_signature()
 
             # Look up sender alias
@@ -194,11 +229,13 @@ class Distributor:
                 except Exception as e:
                     logger.debug("Failed to resolve alias for user %d: %s", msg.source_user_id, e)
 
-            # Send
+            # Send — pass redis for C-1 (bot username cache) and H-1 (paid broadcast)
             result = await send_single(
                 self._bot, msg, task.dest_chat_id, signature,
                 reply_to_message_id=task.reply_to_message_id,
                 sender_alias=sender_alias,
+                redis=self._redis,
+                allow_paid_broadcast=allow_paid,
             )
 
             # Log success
@@ -283,27 +320,65 @@ class Distributor:
             )
             self._rate_limiter.report_error(task.dest_chat_id)
 
+    async def _get_allow_paid_broadcast(self) -> bool:
+        """H-1: Read allow_paid_broadcast flag from config DB (30-second Redis cache).
+
+        Defaults to False — the operator must explicitly enable paid broadcasts.
+        Set config key 'allow_paid_broadcast' to 'true' in bot_config to enable.
+        """
+        cache_key = "config:allow_paid_broadcast"
+        cached = await self._redis.get(cache_key)
+        if cached is not None:
+            val = cached if isinstance(cached, str) else cached.decode()
+            return val == "true"
+
+        async with async_session() as session:
+            repo = ConfigRepo(session)
+            raw = await repo.get_value("allow_paid_broadcast")
+
+        result = (raw or "false").lower() == "true"
+        await self._redis.set(cache_key, "true" if result else "false", ex=30)
+        return result
+
     async def _get_signature(self) -> str | None:
-        """Build the signature from config."""
+        """M-4: Build the signature from config, cached in Redis for 30 seconds.
+
+        This avoids one DB round-trip per message per worker at high throughput
+        (previously ~250 reads/s at 10 workers × 25 msg/s).
+        """
+        # Check Redis cache first
+        cached = await self._redis.get(_SIGNATURE_CACHE_KEY)
+        if cached is not None:
+            val = cached if isinstance(cached, str) else cached.decode()
+            return val if val else None  # empty string → None (signature disabled)
+
+        # Cache miss — read from DB
         async with async_session() as session:
             repo = ConfigRepo(session)
             enabled = await repo.get_bool("signature_enabled", default=True)
             if not enabled:
+                await self._redis.set(_SIGNATURE_CACHE_KEY, "", ex=_SIGNATURE_CACHE_TTL)
                 return None
 
             text = await repo.get_value("signature_text")
             url = await repo.get_value("signature_url")
 
-            if text:
-                sig = text
-            elif url:
-                sig = url
-            else:
-                # Default: bot promotion signature
-                bot_info = await self._bot.get_me()
-                sig = f"— via @{bot_info.username}" if bot_info.username else None
+        if text:
+            sig = text
+        elif url:
+            sig = url
+        else:
+            # Default: bot promotion signature
+            bot_info = await self._bot.get_me()
+            sig = f"— via @{bot_info.username}" if bot_info.username else None
 
-            return sig
+        # Cache the result (empty string for "no signature")
+        await self._redis.set(_SIGNATURE_CACHE_KEY, sig or "", ex=_SIGNATURE_CACHE_TTL)
+        return sig
+
+    async def invalidate_signature_cache(self) -> None:
+        """Call after admin changes signature config so the new value takes effect immediately."""
+        await self._redis.delete(_SIGNATURE_CACHE_KEY)
 
     async def _log_send(
         self, msg: NormalizedMessage, dest_chat_id: int, dest_message_id: int
@@ -337,7 +412,12 @@ SEND_LOG_CLEANUP_INTERVAL = 3600  # Run every hour
 
 
 class SendLogCleaner:
-    """Periodic background task to prune send_log rows older than 48 hours."""
+    """Periodic background task to prune send_log rows older than 48 hours.
+
+    L-3: The cleaner runs _cleanup() immediately on first tick (no initial sleep),
+    so it performs one DB write shortly after startup. This is intentional — it
+    ensures stale rows from a previous run are pruned without waiting an hour.
+    """
 
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
@@ -369,14 +449,13 @@ class SendLogCleaner:
             await asyncio.sleep(SEND_LOG_CLEANUP_INTERVAL)
 
     async def _cleanup(self) -> None:
-        from datetime import datetime, timedelta
-
         from sqlalchemy import delete
 
         from bot.models.send_log import SendLog
 
-        # Use naive UTC timestamp because send_log.sent_at is stored without tzinfo.
-        cutoff = datetime.utcnow() - timedelta(hours=SEND_LOG_MAX_AGE_HOURS)
+        # C-4: Use timezone-aware UTC datetime (datetime.utcnow() is deprecated in 3.12
+        # and causes silent comparison failures against TZ-aware Postgres TIMESTAMPTZ columns).
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=SEND_LOG_MAX_AGE_HOURS)
         async with async_session() as session:
             result = await session.execute(
                 delete(SendLog).where(SendLog.sent_at < cutoff)
@@ -399,3 +478,11 @@ def get_distributor(bot: Bot | None = None, redis: aioredis.Redis | None = None)
             raise RuntimeError("Distributor not initialized")
         _distributor = Distributor(bot, redis)
     return _distributor
+
+
+# ── Test helpers ──────────────────────────────────────────────────────
+
+def _reset_distributor_for_testing() -> None:
+    """L-1: Reset the distributor singleton. For use in tests only."""
+    global _distributor
+    _distributor = None

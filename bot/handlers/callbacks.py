@@ -7,6 +7,7 @@ import logging
 import math
 from datetime import datetime, timezone
 
+from aiogram.enums import ParseMode
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
@@ -103,7 +104,9 @@ async def cb_settings(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text("⚙️ <b>Settings</b>", reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer("⚙️ <b>Settings</b>", reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer("⚙️ <b>Settings</b>", reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -166,7 +169,7 @@ async def cb_myplan(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer(text, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -190,7 +193,8 @@ async def cb_selfsend(callback: CallbackQuery) -> None:
         )
     except Exception:
         await callback.message.answer(  # type: ignore[union-attr]
-            f"🔄 Echo is now <b>{status}</b>", reply_markup=kb
+            f"🔄 Echo is now <b>{status}</b>", reply_markup=kb,
+            parse_mode=ParseMode.HTML,
         )
     await callback.answer(f"Echo {status}")
 
@@ -359,7 +363,7 @@ async def cb_admin_status(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text("\n".join(lines), reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer("\n".join(lines), reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -484,7 +488,7 @@ async def cb_chat_list(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text("\n".join(lines), reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer("\n".join(lines), reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -530,7 +534,7 @@ async def cb_chat_detail(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer(text, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -993,7 +997,7 @@ async def cb_help_how(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(_HELP_HOW_TEXT, reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer(_HELP_HOW_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer(_HELP_HOW_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -1004,7 +1008,7 @@ async def cb_help_prem(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(_HELP_PREM_TEXT, reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer(_HELP_PREM_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer(_HELP_PREM_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -1018,7 +1022,7 @@ async def cb_help_admin(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(_HELP_ADMIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer(_HELP_ADMIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer(_HELP_ADMIN_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -1029,5 +1033,5 @@ async def cb_help_back(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(_HELP_MAIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
     except Exception:
-        await callback.message.answer(_HELP_MAIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.answer(_HELP_MAIN_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()

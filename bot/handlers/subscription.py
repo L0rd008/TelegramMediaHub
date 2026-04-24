@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from aiogram.enums import ParseMode
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
@@ -44,12 +45,16 @@ async def cmd_subscribe(message: Message, command: CommandObject) -> None:
         try:
             target_chat_id = int(command.args.strip())
         except ValueError:
-            await message.answer("Usage: /subscribe [chat_id]")
+            await message.answer("Usage: /subscribe [chat_id]",
+                parse_mode=ParseMode.HTML,
+            )
             return
 
     text = build_pricing_text()
     keyboard = build_pricing_keyboard(target_chat_id)
-    await message.answer(text, reply_markup=keyboard)
+    await message.answer(text, reply_markup=keyboard,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /plan ─────────────────────────────────────────────────────────────
@@ -68,7 +73,8 @@ async def cmd_plan(message: Message) -> None:
 
     if chat is None:
         await message.answer(
-            "This chat is not registered yet. Use /start first."
+            "This chat is not registered yet. Use /start first.",
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -89,7 +95,9 @@ async def cmd_plan(message: Message) -> None:
             "",
             "Everything is flowing. Enjoy.",
         ]
-        await message.answer("\n".join(lines), reply_markup=build_plan_active_actions())
+        await message.answer("\n".join(lines), reply_markup=build_plan_active_actions(),
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     # Check trial
@@ -104,7 +112,8 @@ async def cmd_plan(message: Message) -> None:
             "No payment needed yet.",
         ]
         await message.answer(
-            "\n".join(lines), reply_markup=build_plan_trial_actions()
+            "\n".join(lines), reply_markup=build_plan_trial_actions(),
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -116,7 +125,9 @@ async def cmd_plan(message: Message) -> None:
         "from your whole network again, go Premium — it's about "
         "<b>1 star per hour</b>.",
     ]
-    await message.answer("\n".join(lines), reply_markup=build_subscribe_button())
+    await message.answer("\n".join(lines), reply_markup=build_subscribe_button(),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── Callback: plan selection ──────────────────────────────────────────
@@ -132,7 +143,7 @@ async def cb_show_plans(callback: CallbackQuery) -> None:
 
     text = build_pricing_text()
     keyboard = build_pricing_keyboard(target_chat_id)
-    await callback.message.answer(text, reply_markup=keyboard)  # type: ignore[union-attr]
+    await callback.message.answer(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
 
 
@@ -261,7 +272,9 @@ async def on_successful_payment(message: Message) -> None:
         "Messages from your entire network will now flow into this chat. "
         "Thank you for supporting the bot.",
     ]
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines),
+        parse_mode=ParseMode.HTML,
+    )
 
     # If the subscription target is a different chat, notify that chat too
     if target_chat_id != message.chat.id:
@@ -274,6 +287,8 @@ async def on_successful_payment(message: Message) -> None:
                     "Messages from all connected chats will now arrive here. "
                     f"Active until <b>{expires_str}</b>.",
                 ]
-                await bot.send_message(target_chat_id, "\n".join(notify_lines))
+                await bot.send_message(target_chat_id, "\n".join(notify_lines),
+                    parse_mode=ParseMode.HTML,
+                )
         except Exception as e:
             logger.debug("Could not notify target chat %d: %s", target_chat_id, e)

@@ -10,7 +10,6 @@ import redis.asyncio as aioredis
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.enums import ParseMode
 from aiogram.webhook.aiohttp_server import (
     SimpleRequestHandler,
     setup_application,
@@ -31,10 +30,13 @@ def _create_bot() -> Bot:
         session = AiohttpSession(
             api=TelegramAPIServer.from_base(settings.LOCAL_API_URL)
         )
+    # C-2: No global parse_mode. Bot-authored HTML messages set parse_mode=ParseMode.HTML
+    # explicitly on each call. Content-forwarding send calls use parse_mode=None so the
+    # entities array is respected instead of being silently ignored by the HTML parser.
     return Bot(
         token=settings.BOT_TOKEN,
         session=session,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        default=DefaultBotProperties(),
     )
 
 
@@ -46,6 +48,7 @@ def _register_routers(dp: Dispatcher) -> None:
     from bot.handlers.callbacks import callbacks_router
     from bot.handlers.subscription import subscription_router
     from bot.handlers.edits import edits_router
+    from bot.handlers.managed_bot import managed_bot_router  # M-7
     from bot.handlers.messages import messages_router
 
     dp.include_router(membership_router)
@@ -54,6 +57,7 @@ def _register_routers(dp: Dispatcher) -> None:
     dp.include_router(callbacks_router)  # non-subscription inline buttons
     dp.include_router(subscription_router)
     dp.include_router(edits_router)
+    dp.include_router(managed_bot_router)  # M-7: ManagedBot service-message stubs
     dp.include_router(messages_router)  # must be last (catch-all)
 
 
@@ -207,6 +211,7 @@ async def _run_polling(bot: Bot, dp: Dispatcher) -> None:
             "my_chat_member",
             "callback_query",
             "pre_checkout_query",
+            "chat_member",  # M-7: receive managed-bot membership updates
         ],
     )
 
@@ -243,6 +248,7 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
             "my_chat_member",
             "callback_query",
             "pre_checkout_query",
+            "chat_member",  # M-7: receive managed-bot membership updates
         ],
         drop_pending_updates=True,
         max_connections=40,

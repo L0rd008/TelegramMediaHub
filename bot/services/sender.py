@@ -9,7 +9,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import redis.asyncio as aioredis
 from aiogram import Bot
+from aiogram.enums import ParseMode
 from aiogram.types import (
     InputMediaAnimation,
     InputMediaAudio,
@@ -31,17 +33,27 @@ logger = logging.getLogger(__name__)
 TEXT_MAX_LEN = 4096
 CAPTION_MAX_LEN = 1024
 
-# Cached bot username (resolved once on first send)
-_bot_username_cache: str = ""
+# Redis key and TTL for the cached bot username (C-1)
+_BOT_USERNAME_REDIS_KEY = "bot:username"
+_BOT_USERNAME_TTL = 3600  # 1 hour
 
 
-async def _get_bot_username(bot: Bot) -> str:
-    """Return the bot's username, caching after the first API call."""
-    global _bot_username_cache
-    if not _bot_username_cache:
-        info = await bot.get_me()
-        _bot_username_cache = info.username or ""
-    return _bot_username_cache
+async def _get_bot_username(bot: Bot, redis: aioredis.Redis) -> str:
+    """Return the bot's username, using Redis as a process-safe cache.
+
+    Falls back to a getMe() API call on cache miss, then stores the result
+    in Redis with a 1-hour TTL so all processes share the same value and it
+    is automatically invalidated after username changes.
+    """
+    cached = await redis.get(_BOT_USERNAME_REDIS_KEY)
+    if cached:
+        return cached.decode() if isinstance(cached, bytes) else cached
+
+    info = await bot.get_me()
+    username = info.username or ""
+    if username:
+        await redis.set(_BOT_USERNAME_REDIS_KEY, username, ex=_BOT_USERNAME_TTL)
+    return username
 
 
 def _rebuild_entities(raw: list[dict[str, Any]] | None) -> list[MessageEntity] | None:
@@ -85,16 +97,21 @@ async def send_single(
     signature: str | None,
     reply_to_message_id: int | None = None,
     sender_alias: str | None = None,
+    redis: aioredis.Redis | None = None,
+    allow_paid_broadcast: bool = False,
 ) -> Message | None:
     """Send a single NormalizedMessage to *chat_id*. Returns the sent Message."""
 
     # Resolve alias as plain text + URL (never HTML — avoids entity/parse_mode conflict)
     alias_plain = ""
     alias_url = ""
-    if sender_alias:
-        bot_uname = await _get_bot_username(bot)
+    if sender_alias and redis:
+        bot_uname = await _get_bot_username(bot, redis)
         alias_plain = sender_alias
         alias_url = f"https://t.me/{bot_uname}" if bot_uname else ""
+    elif sender_alias:
+        # redis not available — alias text only, no link
+        alias_plain = sender_alias
 
     if alias_plain:
         raw_text = f"{msg.text}\n\n{alias_plain}" if msg.text else msg.text
@@ -135,6 +152,10 @@ async def send_single(
                     chat_id=chat_id,
                     text=text or "",
                     entities=entities,
+                    # C-2: parse_mode=None disables the global HTML default so that
+                    # the entities array is honoured instead of being silently ignored.
+                    parse_mode=None,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -144,8 +165,10 @@ async def send_single(
                     photo=msg.file_id,  # type: ignore[arg-type]
                     caption=caption,
                     caption_entities=caption_entities,
+                    parse_mode=None,
                     has_spoiler=msg.has_spoiler,
                     show_caption_above_media=msg.show_caption_above_media or None,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -155,12 +178,14 @@ async def send_single(
                     video=msg.file_id,  # type: ignore[arg-type]
                     caption=caption,
                     caption_entities=caption_entities,
+                    parse_mode=None,
                     duration=msg.duration,
                     width=msg.width,
                     height=msg.height,
                     has_spoiler=msg.has_spoiler,
                     supports_streaming=msg.supports_streaming,
                     show_caption_above_media=msg.show_caption_above_media or None,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -170,11 +195,13 @@ async def send_single(
                     animation=msg.file_id,  # type: ignore[arg-type]
                     caption=caption,
                     caption_entities=caption_entities,
+                    parse_mode=None,
                     duration=msg.duration,
                     width=msg.width,
                     height=msg.height,
                     has_spoiler=msg.has_spoiler,
                     show_caption_above_media=msg.show_caption_above_media or None,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -184,9 +211,11 @@ async def send_single(
                     audio=msg.file_id,  # type: ignore[arg-type]
                     caption=caption,
                     caption_entities=caption_entities,
+                    parse_mode=None,
                     duration=msg.duration,
                     performer=msg.performer,
                     title=msg.title,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -196,6 +225,8 @@ async def send_single(
                     document=msg.file_id,  # type: ignore[arg-type]
                     caption=caption,
                     caption_entities=caption_entities,
+                    parse_mode=None,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -205,7 +236,9 @@ async def send_single(
                     voice=msg.file_id,  # type: ignore[arg-type]
                     caption=caption,
                     caption_entities=caption_entities,
+                    parse_mode=None,
                     duration=msg.duration,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -215,6 +248,7 @@ async def send_single(
                     video_note=msg.file_id,  # type: ignore[arg-type]
                     duration=msg.duration,
                     length=msg.width,  # diameter
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -222,6 +256,7 @@ async def send_single(
                 return await bot.send_sticker(
                     chat_id=chat_id,
                     sticker=msg.file_id,  # type: ignore[arg-type]
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=reply_params,
                 )
 
@@ -230,6 +265,8 @@ async def send_single(
                     bot, msg, chat_id, signature,
                     reply_to_message_id=reply_to_message_id,
                     sender_alias=sender_alias,
+                    redis=redis,
+                    allow_paid_broadcast=allow_paid_broadcast,
                 )
 
             case _:
@@ -253,6 +290,8 @@ async def send_media_group(
     signature: str | None,
     reply_to_message_id: int | None = None,
     sender_alias: str | None = None,
+    redis: aioredis.Redis | None = None,
+    allow_paid_broadcast: bool = False,
 ) -> Message | None:
     """Send a media group (album) to *chat_id*.
 
@@ -271,6 +310,8 @@ async def send_media_group(
             bot, msg.group_items[0], chat_id, signature,
             reply_to_message_id=reply_to_message_id,
             sender_alias=sender_alias,
+            redis=redis,
+            allow_paid_broadcast=allow_paid_broadcast,
         )
 
     # Group items by compatible types
@@ -279,22 +320,32 @@ async def send_media_group(
     # Resolve alias as plain text + URL (entity-based, never HTML)
     alias_plain = ""
     alias_url = ""
-    if sender_alias:
-        bot_uname = await _get_bot_username(bot)
+    if sender_alias and redis:
+        bot_uname = await _get_bot_username(bot, redis)
         alias_plain = sender_alias
         alias_url = f"https://t.me/{bot_uname}" if bot_uname else ""
+    elif sender_alias:
+        alias_plain = sender_alias
 
     first_result = None
     for group in groups:
         input_media = []
         for i, item in enumerate(group):
-            # Only first item in the group gets caption + alias + signature
+            # C-3: Build caption/entities correctly for every item in the group.
+            # Only the first item of the entire album receives the alias + signature;
+            # all other items preserve their own original caption and entities.
             if i == 0 and alias_plain:
                 raw_cap = f"{item.caption}\n\n{alias_plain}" if item.caption else alias_plain
             else:
                 raw_cap = item.caption
-            cap = apply_signature(raw_cap, signature, CAPTION_MAX_LEN) if i == 0 else (item.caption if i > 0 else None)
-            cap_entities = _rebuild_entities(item.caption_entities) if i == 0 else None
+
+            if i == 0:
+                cap = apply_signature(raw_cap, signature, CAPTION_MAX_LEN)
+            else:
+                cap = item.caption  # preserve original caption verbatim
+
+            # Rebuild entities for every item (not just the first)
+            cap_entities = _rebuild_entities(item.caption_entities)
 
             # Add alias entity to the first item's caption
             if i == 0 and alias_plain and alias_url and cap:
@@ -309,6 +360,8 @@ async def send_media_group(
                             media=item.file_id,  # type: ignore[arg-type]
                             caption=cap,
                             caption_entities=cap_entities,
+                            # C-2: disable global parse_mode so entities are used
+                            parse_mode=None,
                             has_spoiler=item.has_spoiler,
                             show_caption_above_media=item.show_caption_above_media or None,
                         )
@@ -319,6 +372,7 @@ async def send_media_group(
                             media=item.file_id,  # type: ignore[arg-type]
                             caption=cap,
                             caption_entities=cap_entities,
+                            parse_mode=None,
                             has_spoiler=item.has_spoiler,
                             duration=item.duration,
                             width=item.width,
@@ -333,6 +387,7 @@ async def send_media_group(
                             media=item.file_id,  # type: ignore[arg-type]
                             caption=cap,
                             caption_entities=cap_entities,
+                            parse_mode=None,
                             has_spoiler=item.has_spoiler,
                             duration=item.duration,
                             width=item.width,
@@ -346,6 +401,7 @@ async def send_media_group(
                             media=item.file_id,  # type: ignore[arg-type]
                             caption=cap,
                             caption_entities=cap_entities,
+                            parse_mode=None,
                             duration=item.duration,
                             performer=item.performer,
                             title=item.title,
@@ -357,6 +413,7 @@ async def send_media_group(
                             media=item.file_id,  # type: ignore[arg-type]
                             caption=cap,
                             caption_entities=cap_entities,
+                            parse_mode=None,
                         )
                     )
                 case _:
@@ -364,6 +421,8 @@ async def send_media_group(
                     await send_single(
                         bot, item, chat_id, signature if i == 0 else None,
                         sender_alias=sender_alias if i == 0 else None,
+                        redis=redis,
+                        allow_paid_broadcast=allow_paid_broadcast,
                     )
                     continue
 
@@ -376,14 +435,19 @@ async def send_media_group(
             )
 
         if len(input_media) >= 2:
-            # Send in chunks of 10 (Telegram limit)
+            # Send in chunks of 10 (Telegram limit).
+            # M-6 (known limitation): only the first chunk carries reply_parameters;
+            # subsequent chunks are sent without a reply reference to avoid floating
+            # orphaned messages while keeping the first chunk anchored correctly.
             for chunk_start in range(0, len(input_media), 10):
                 chunk = input_media[chunk_start : chunk_start + 10]
                 result = await bot.send_media_group(
-                    chat_id=chat_id, media=chunk,
+                    chat_id=chat_id,
+                    media=chunk,
+                    allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=mg_reply_params,
                 )
-                # Only reply to the first chunk
+                # Only the first chunk gets the reply anchor
                 mg_reply_params = None
                 if first_result is None and result:
                     first_result = result[0]
@@ -392,6 +456,8 @@ async def send_media_group(
             result = await send_single(
                 bot, group[0], chat_id, signature,
                 sender_alias=sender_alias,
+                redis=redis,
+                allow_paid_broadcast=allow_paid_broadcast,
             )
             if first_result is None:
                 first_result = result
@@ -436,3 +502,11 @@ def _split_by_compatibility(
         groups.append([item])
 
     return groups
+
+
+# ── Test helpers ──────────────────────────────────────────────────────
+# L-1: Allow resetting the Redis-cached username between test runs.
+
+async def _reset_bot_username_cache(redis: aioredis.Redis) -> None:
+    """Delete the cached bot username from Redis. For use in tests only."""
+    await redis.delete(_BOT_USERNAME_REDIS_KEY)

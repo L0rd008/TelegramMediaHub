@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from aiogram.enums import ParseMode
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
@@ -69,6 +70,7 @@ async def cmd_start(message: Message) -> None:
         "like an original message, never a forward.\n\n"
         f"You have full access to everything. Explore the options below.{alias_line}",
         reply_markup=build_main_menu(),
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -96,7 +98,9 @@ async def cmd_help(message: Message) -> None:
     ]
 
     kb = build_help_menu(admin)
-    await message.answer("\n".join(lines), reply_markup=kb)
+    await message.answer("\n".join(lines), reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 @start_router.message(Command("stop"))
@@ -107,6 +111,7 @@ async def cmd_stop(message: Message) -> None:
         "It will stop sending and receiving synced messages. "
         "You can always reconnect with /start.",
         reply_markup=build_stop_confirm(),
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -120,7 +125,9 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
         async with async_session() as session:
             chat = await ChatRepo(session).get_chat(message.chat.id)
         if chat is None:
-            await message.answer("Please /start first to register this chat.")
+            await message.answer("Please /start first to register this chat.",
+                parse_mode=ParseMode.HTML,
+            )
             return
         status = "ON ✅" if chat.allow_self_send else "OFF"
         kb = build_selfsend_result(chat.allow_self_send)
@@ -129,6 +136,7 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
             "When echo is on, messages you send here also come back "
             "to this chat from your other connected chats.",
             reply_markup=kb,
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -140,7 +148,9 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
 
     status = "ON ✅" if enabled else "OFF"
     kb = build_selfsend_result(enabled)
-    await message.answer(f"🔄 Echo is now <b>{status}</b>", reply_markup=kb)
+    await message.answer(f"🔄 Echo is now <b>{status}</b>", reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 @start_router.message(Command("broadcast"))
@@ -152,13 +162,17 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
     if not raw_args or len(raw_args) != 2 or raw_args[0] not in ("off", "on") or raw_args[1] not in ("in", "out"):
         redis = _get_redis()
         if redis is None:
-            await message.answer("Service temporarily unavailable.")
+            await message.answer("Service temporarily unavailable.",
+                parse_mode=ParseMode.HTML,
+            )
             return
 
         async with async_session() as session:
             chat_obj = await ChatRepo(session).get_chat(message.chat.id)
         if chat_obj is None:
-            await message.answer("Please /start first to register this chat.")
+            await message.answer("Please /start first to register this chat.",
+                parse_mode=ParseMode.HTML,
+            )
             return
 
         if not await is_premium(redis, message.chat.id, chat_obj.registered_at):
@@ -167,7 +181,8 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
                 "Choose exactly what this chat sends and receives. "
                 "Plans start at about <b>1 star per hour</b>.",
                 reply_markup=build_subscribe_button(),
-            )
+        parse_mode=ParseMode.HTML,
+    )
             return
 
         out_status = "ON" if chat_obj.is_source else "PAUSED"
@@ -178,6 +193,7 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
             f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
             f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
             reply_markup=kb,
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -187,13 +203,17 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
     # Premium gating
     redis = _get_redis()
     if redis is None:
-        await message.answer("Service temporarily unavailable.")
+        await message.answer("Service temporarily unavailable.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     async with async_session() as session:
         chat_obj = await ChatRepo(session).get_chat(message.chat.id)
     if chat_obj is None:
-        await message.answer("Please /start first to register this chat.")
+        await message.answer("Please /start first to register this chat.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     if not await is_premium(redis, message.chat.id, chat_obj.registered_at):
@@ -202,7 +222,8 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
             "Choose exactly what this chat sends and receives. "
             "Plans start at about <b>1 star per hour</b>.",
             reply_markup=build_subscribe_button(),
-        )
+        parse_mode=ParseMode.HTML,
+    )
         return
 
     async with async_session() as session:
@@ -224,6 +245,7 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
         f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
         f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
         reply_markup=kb,
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -252,7 +274,9 @@ async def cmd_stats(message: Message) -> None:
 
             chat = await chat_repo.get_chat(chat_id)
             if chat is None:
-                await message.answer("This chat is not registered. Use /start first.")
+                await message.answer("This chat is not registered. Use /start first.",
+                    parse_mode=ParseMode.HTML,
+                )
                 return
 
             sent_count = await log_repo.count_messages_from_chat(chat_id)
@@ -260,7 +284,9 @@ async def cmd_stats(message: Message) -> None:
             active_sub = await sub_repo.get_active_subscription(chat_id)
     except Exception as e:
         logger.exception("Stats error for chat %d: %s", chat_id, e)
-        await message.answer("Stats are temporarily unavailable. Please try again in a bit.")
+        await message.answer("Stats are temporarily unavailable. Please try again in a bit.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     # Chat name
@@ -410,7 +436,9 @@ async def cmd_stats(message: Message) -> None:
             ])
 
     kb = build_stats_actions(admin)
-    await message.answer("\n".join(lines), reply_markup=kb)
+    await message.answer("\n".join(lines), reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 def _get_redis():

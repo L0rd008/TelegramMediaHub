@@ -6,6 +6,7 @@ import logging
 import math
 from datetime import datetime, timezone
 
+from aiogram.enums import ParseMode
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
@@ -120,7 +121,9 @@ async def cmd_status(message: Message) -> None:
     ]
 
     kb = build_status_actions(paused, edit_mode, sig_enabled)
-    await message.answer("\n".join(lines), reply_markup=kb)
+    await message.answer("\n".join(lines), reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /list ─────────────────────────────────────────────────────────────
@@ -145,7 +148,9 @@ async def cmd_list(message: Message, command: CommandObject) -> None:
         total = await repo.count_active()
 
     if not chats:
-        await message.answer("No active chats.")
+        await message.answer("No active chats.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     total_pages = max(1, math.ceil(total / 20))
@@ -164,7 +169,9 @@ async def cmd_list(message: Message, command: CommandObject) -> None:
         lines.append(f"• <code>{c.chat_id}</code> {name} {''.join(flags)}")
 
     kb = build_chat_list_nav(display_page, total_pages)
-    await message.answer("\n".join(lines), reply_markup=kb)
+    await message.answer("\n".join(lines), reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /signature ────────────────────────────────────────────────────────
@@ -178,7 +185,9 @@ async def cmd_signature(message: Message, command: CommandObject) -> None:
 
     text = (command.args or "").strip()
     if not text:
-        await message.answer("Usage: /signature <text>\nExample: /signature — via @MyChannel")
+        await message.answer("Usage: /signature <text>\nExample: /signature — via @MyChannel",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     async with async_session() as session:
@@ -187,7 +196,9 @@ async def cmd_signature(message: Message, command: CommandObject) -> None:
         await repo.set_value("signature_url", "")
         await repo.set_value("signature_enabled", "true")
 
-    await message.answer(f"✅ Signature set: <code>{text}</code>")
+    await message.answer(f"✅ Signature set: <code>{text}</code>",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /signatureurl ────────────────────────────────────────────────────
@@ -201,7 +212,9 @@ async def cmd_signatureurl(message: Message, command: CommandObject) -> None:
 
     url = (command.args or "").strip()
     if not url:
-        await message.answer("Usage: /signatureurl <url>")
+        await message.answer("Usage: /signatureurl <url>",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     async with async_session() as session:
@@ -210,7 +223,9 @@ async def cmd_signatureurl(message: Message, command: CommandObject) -> None:
         await repo.set_value("signature_text", "")
         await repo.set_value("signature_enabled", "true")
 
-    await message.answer(f"✅ Signature URL set: <code>{url}</code>")
+    await message.answer(f"✅ Signature URL set: <code>{url}</code>",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /signatureoff ────────────────────────────────────────────────────
@@ -226,7 +241,9 @@ async def cmd_signatureoff(message: Message) -> None:
         repo = ConfigRepo(session)
         await repo.set_value("signature_enabled", "false")
 
-    await message.answer("✅ Signature disabled.")
+    await message.answer("✅ Signature disabled.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /pause ────────────────────────────────────────────────────────────
@@ -245,6 +262,7 @@ async def cmd_pause(message: Message) -> None:
     await message.answer(
         "⏸️ <b>Distribution paused.</b>",
         reply_markup=build_pause_feedback(),
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -264,6 +282,7 @@ async def cmd_resume(message: Message) -> None:
     await message.answer(
         "▶️ <b>Distribution resumed.</b>",
         reply_markup=build_resume_feedback(),
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -286,6 +305,7 @@ async def cmd_edits(message: Message, command: CommandObject) -> None:
         await message.answer(
             f"📝 <b>Edit redistribution: {current.upper()}</b>",
             reply_markup=kb,
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -294,7 +314,9 @@ async def cmd_edits(message: Message, command: CommandObject) -> None:
         await repo.set_value("edit_redistribution", mode)
 
     kb = build_edits_panel(mode)
-    await message.answer(f"✅ Edit redistribution: <b>{mode}</b>", reply_markup=kb)
+    await message.answer(f"✅ Edit redistribution: <b>{mode}</b>", reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /remove ───────────────────────────────────────────────────────────
@@ -310,14 +332,18 @@ async def cmd_remove(message: Message, command: CommandObject) -> None:
     target = await _resolve_target_user(message, command.args, bot_info.id)
 
     if target is None:
-        await message.answer("Usage: /remove &lt;chat_id&gt; or reply to a user's message.")
+        await message.answer("Usage: /remove &lt;chat_id&gt; or reply to a user's message.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     async with async_session() as session:
         repo = ChatRepo(session)
         await repo.deactivate_chat(target)
 
-    await message.answer(f"✅ Chat <code>{target}</code> removed.")
+    await message.answer(f"✅ Chat <code>{target}</code> removed.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /grant ───────────────────────────────────────────────────────────
@@ -347,15 +373,18 @@ async def cmd_grant(message: Message, command: CommandObject) -> None:
         try:
             chat_id = int(args_raw[0])
         except ValueError:
-            await message.answer("Invalid chat ID. Must be a number.")
+            await message.answer("Invalid chat ID. Must be a number.",
+                parse_mode=ParseMode.HTML,
+            )
             return
         plan_key = args_raw[1].lower()
 
     if chat_id is None or plan_key is None:
         plans_list = ", ".join(PLANS.keys())
         await message.answer(
-            f"Usage: /grant &lt;chat_id&gt; &lt;plan&gt; or reply + /grant &lt;plan&gt;\n"
-            f"Plans: {plans_list}"
+            f"Usage: /grant <chat_id> <plan> or reply + /grant <plan>\n"
+            f"Plans: {plans_list}",
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -363,7 +392,8 @@ async def cmd_grant(message: Message, command: CommandObject) -> None:
     if plan is None:
         await message.answer(
             f"Unknown plan '<code>{plan_key}</code>'. "
-            f"Available: {', '.join(PLANS.keys())}"
+            f"Available: {', '.join(PLANS.keys())}",
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -387,7 +417,8 @@ async def cmd_grant(message: Message, command: CommandObject) -> None:
     expires_str = sub.expires_at.strftime("%d %b %Y")
     await message.answer(
         f"✅ Granted <b>{plan.label}</b> to chat <code>{chat_id}</code>.\n"
-        f"Expires: <b>{expires_str}</b>"
+        f"Expires: <b>{expires_str}</b>",
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -404,7 +435,9 @@ async def cmd_revoke(message: Message, command: CommandObject) -> None:
     target = await _resolve_target_user(message, command.args, bot_info.id)
 
     if target is None:
-        await message.answer("Usage: /revoke &lt;chat_id&gt; or reply to a user's message.")
+        await message.answer("Usage: /revoke &lt;chat_id&gt; or reply to a user's message.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     async with async_session() as session:
@@ -415,12 +448,14 @@ async def cmd_revoke(message: Message, command: CommandObject) -> None:
         distributor = get_distributor()
         await invalidate_cache(distributor._redis, target)
         await message.answer(
-            f"✅ Subscriptions revoked for chat <code>{target}</code>."
-        )
+            f"✅ Subscriptions revoked for chat <code>{target}</code>.",
+        parse_mode=ParseMode.HTML,
+    )
     else:
         await message.answer(
-            f"No active subscriptions found for chat <code>{target}</code>."
-        )
+            f"No active subscriptions found for chat <code>{target}</code>.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /mute (admin moderation) ────────────────────────────────────────
@@ -449,7 +484,9 @@ async def cmd_mute(message: Message, command: CommandObject) -> None:
         try:
             target = int(args_raw[0])
         except ValueError:
-            await message.answer("Invalid user ID.")
+            await message.answer("Invalid user ID.",
+                parse_mode=ParseMode.HTML,
+            )
             return
         duration_str = args_raw[1]
 
@@ -457,7 +494,8 @@ async def cmd_mute(message: Message, command: CommandObject) -> None:
         await message.answer(
             "Usage: /mute &lt;user_id&gt; &lt;duration&gt;\n"
             "Or reply to a message + /mute [duration]\n"
-            "Duration: 30m, 2h, 7d, 1d12h"
+            "Duration: 30m, 2h, 7d, 1d12h",
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -467,12 +505,15 @@ async def cmd_mute(message: Message, command: CommandObject) -> None:
         await message.answer(
             f"🔇 Mute user <code>{target}</code>?\nSelect duration:",
             reply_markup=kb,
-        )
+        parse_mode=ParseMode.HTML,
+    )
         return
 
     td = parse_duration(duration_str)
     if td is None:
-        await message.answer("Invalid duration. Examples: 30m, 2h, 7d, 1d12h")
+        await message.answer("Invalid duration. Examples: 30m, 2h, 7d, 1d12h",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     expires = datetime.now(timezone.utc) + td
@@ -491,7 +532,9 @@ async def cmd_mute(message: Message, command: CommandObject) -> None:
     await invalidate_restriction_cache(distributor._redis, target)
 
     await message.answer(
-        f"🔇 User <code>{target}</code> muted for <b>{format_duration(td)}</b>.\n"
+        f"🔇 User <code>{target}</code> muted for <b>{format_duration(td,
+        parse_mode=ParseMode.HTML,
+    )}</b>.\n"
         f"Expires: <b>{expires.strftime('%d %b %Y %H:%M')} UTC</b>"
     )
 
@@ -509,7 +552,9 @@ async def cmd_unmute(message: Message, command: CommandObject) -> None:
     target = await _resolve_target_user(message, command.args, bot_info.id)
 
     if target is None:
-        await message.answer("Usage: /unmute &lt;user_id&gt; or reply to a user's message.")
+        await message.answer("Usage: /unmute &lt;user_id&gt; or reply to a user's message.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     async with async_session() as session:
@@ -520,9 +565,13 @@ async def cmd_unmute(message: Message, command: CommandObject) -> None:
         distributor = get_distributor()
         await invalidate_restriction_cache(distributor._redis, target)
         kb = build_unmute_undo(target)
-        await message.answer(f"🔊 User <code>{target}</code> unmuted.", reply_markup=kb)
+        await message.answer(f"🔊 User <code>{target}</code> unmuted.", reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
     else:
-        await message.answer(f"User <code>{target}</code> is not muted.")
+        await message.answer(f"User <code>{target}</code> is not muted.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /ban ─────────────────────────────────────────────────────────────
@@ -538,7 +587,9 @@ async def cmd_ban(message: Message, command: CommandObject) -> None:
     target = await _resolve_target_user(message, command.args, bot_info.id)
 
     if target is None:
-        await message.answer("Usage: /ban &lt;user_id&gt; or reply to a user's message.")
+        await message.answer("Usage: /ban &lt;user_id&gt; or reply to a user's message.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     # Show confirmation prompt with ban options
@@ -547,6 +598,7 @@ async def cmd_ban(message: Message, command: CommandObject) -> None:
         f"⛔ Permanently ban user <code>{target}</code>?\n\n"
         "Choose whether to also delete their past messages:",
         reply_markup=kb,
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -563,7 +615,9 @@ async def cmd_unban(message: Message, command: CommandObject) -> None:
     target = await _resolve_target_user(message, command.args, bot_info.id)
 
     if target is None:
-        await message.answer("Usage: /unban &lt;user_id&gt; or reply to a user's message.")
+        await message.answer("Usage: /unban &lt;user_id&gt; or reply to a user's message.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     async with async_session() as session:
@@ -574,9 +628,13 @@ async def cmd_unban(message: Message, command: CommandObject) -> None:
         distributor = get_distributor()
         await invalidate_restriction_cache(distributor._redis, target)
         kb = build_unban_undo(target)
-        await message.answer(f"✅ User <code>{target}</code> unbanned.", reply_markup=kb)
+        await message.answer(f"✅ User <code>{target}</code> unbanned.", reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
     else:
-        await message.answer(f"User <code>{target}</code> is not banned.")
+        await message.answer(f"User <code>{target}</code> is not banned.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ── /whois ───────────────────────────────────────────────────────────
@@ -592,7 +650,8 @@ async def cmd_whois(message: Message, command: CommandObject) -> None:
     if not raw:
         await message.answer(
             "Usage: /whois &lt;name&gt;  (e.g. /whois golden_arrow)\n"
-            "Spaces and underscores are interchangeable."
+            "Spaces and underscores are interchangeable.",
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -604,7 +663,9 @@ async def cmd_whois(message: Message, command: CommandObject) -> None:
         user_id = await alias_repo.lookup_by_alias(alias)
 
     if user_id is None:
-        await message.answer(f"No user found for <b>{alias}</b>.")
+        await message.answer(f"No user found for <b>{alias}</b>.",
+        parse_mode=ParseMode.HTML,
+    )
         return
 
     # Check restrictions
@@ -628,4 +689,6 @@ async def cmd_whois(message: Message, command: CommandObject) -> None:
         f"Restriction: {status}",
     ]
     kb = build_moderation_actions(user_id, restriction is not None)
-    await message.answer("\n".join(lines), reply_markup=kb)
+    await message.answer("\n".join(lines), reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )

@@ -70,6 +70,24 @@ class SendLogRepo:
         )
         return result.scalar_one_or_none()
 
+    async def get_source_chat_id(
+        self, dest_chat_id: int, dest_message_id: int
+    ) -> int | None:
+        """Given a bot-sent message, return the original source chat_id.
+
+        Used for reply-based admin targeting (remove, grant, revoke) on
+        redistributed messages so the operation targets the correct chat.
+        """
+        result = await self._s.execute(
+            select(SendLog.source_chat_id)
+            .where(
+                SendLog.dest_chat_id == dest_chat_id,
+                SendLog.dest_message_id == dest_message_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_dest_messages_by_user(
         self, user_id: int
     ) -> list[tuple[int, int]]:

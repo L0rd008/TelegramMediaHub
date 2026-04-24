@@ -54,7 +54,9 @@ def _is_admin(user_id: int | None) -> bool:
 async def _resolve_target_user(
     message: Message, args: str | None, bot_id: int
 ) -> int | None:
-    """Resolve a user ID from either a reply or command arguments.
+    """Resolve a *user* ID from either a reply or command arguments.
+
+    Used for user-scoped operations (mute, ban, unmute, unban, whois).
 
     Priority:
     1. If reply to non-bot message → reply.from_user.id
@@ -72,6 +74,49 @@ async def _resolve_target_user(
                     message.chat.id, reply.message_id
                 )
                 return user_id
+
+    if args:
+        first_token = args.strip().split()[0]
+        try:
+            return int(first_token)
+        except ValueError:
+            return None
+
+    return None
+
+
+async def _resolve_target_chat(
+    message: Message, args: str | None, bot_id: int
+) -> int | None:
+    """Resolve a *chat* ID from either a reply or command arguments.
+
+    Used for chat-scoped operations (remove, grant, revoke).  In a reply
+    context this reads the *sender_chat* (for channel/group posts) or the
+    *from_user* (for private chats where chat_id == user_id).  For bot-sent
+    messages it falls back to the send_log source_chat_id.
+
+    Priority:
+    1. If reply to a channel/group post → reply.sender_chat.id
+    2. If reply to a non-bot user message → reply.from_user.id
+       (works in private chats where user_id == chat_id)
+    3. If reply to a bot message → reverse lookup send_log for source_chat_id
+    4. If args provided → parse first token as int
+    """
+    reply = message.reply_to_message
+    if reply:
+        # Channel / anonymous group post — sender_chat carries the real chat_id
+        if reply.sender_chat:
+            return reply.sender_chat.id
+        if reply.from_user and reply.from_user.id != bot_id:
+            # In a private chat the user's from_user.id IS the chat_id
+            return reply.from_user.id
+        if reply.from_user and reply.from_user.id == bot_id:
+            async with async_session() as session:
+                repo = SendLogRepo(session)
+                chat_id = await repo.get_source_chat_id(
+                    message.chat.id, reply.message_id
+                )
+                return chat_id
 
     if args:
         first_token = args.strip().split()[0]
@@ -329,7 +374,7 @@ async def cmd_remove(message: Message, command: CommandObject) -> None:
         return
 
     bot_info = await message.bot.get_me()
-    target = await _resolve_target_user(message, command.args, bot_info.id)
+    target = await _resolve_target_chat(message, command.args, bot_info.id)
 
     if target is None:
         await message.answer("Usage: /remove &lt;chat_id&gt; or reply to a user's message.",
@@ -364,7 +409,7 @@ async def cmd_grant(message: Message, command: CommandObject) -> None:
 
     if message.reply_to_message:
         # Reply mode: /grant <plan>
-        target = await _resolve_target_user(message, None, bot_info.id)
+        target = await _resolve_target_chat(message, None, bot_info.id)
         chat_id = target
         if args_raw:
             plan_key = args_raw[0].lower()
@@ -432,7 +477,7 @@ async def cmd_revoke(message: Message, command: CommandObject) -> None:
         return
 
     bot_info = await message.bot.get_me()
-    target = await _resolve_target_user(message, command.args, bot_info.id)
+    target = await _resolve_target_chat(message, command.args, bot_info.id)
 
     if target is None:
         await message.answer("Usage: /revoke &lt;chat_id&gt; or reply to a user's message.",
@@ -532,10 +577,9 @@ async def cmd_mute(message: Message, command: CommandObject) -> None:
     await invalidate_restriction_cache(distributor._redis, target)
 
     await message.answer(
-        f"🔇 User <code>{target}</code> muted for <b>{format_duration(td,
+        f"🔇 User <code>{target}</code> muted for <b>{format_duration(td)}</b>.\n"
+        f"Expires: <b>{expires.strftime('%d %b %Y %H:%M')} UTC</b>",
         parse_mode=ParseMode.HTML,
-    )}</b>.\n"
-        f"Expires: <b>{expires.strftime('%d %b %Y %H:%M')} UTC</b>"
     )
 
 

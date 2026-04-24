@@ -5,6 +5,7 @@ docs/
 docs/operations-runbook.md
 !docs/botfather-setup.md
 docs/API Docs/
+.cursor/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

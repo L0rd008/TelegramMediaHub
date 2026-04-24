@@ -365,6 +365,32 @@ async def test_restriction_repo_create():
 
 
 @pytest.mark.asyncio
+async def test_restriction_repo_create_normalizes_aware_expiry():
+    """Aware mute expiries should be stored as naive UTC for the legacy schema."""
+    from bot.db.repositories.restriction_repo import RestrictionRepo
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock()
+    mock_session.commit = AsyncMock()
+    mock_session.add = MagicMock()
+    mock_session.refresh = AsyncMock()
+
+    aware_expiry = datetime.now(timezone.utc) + timedelta(hours=2)
+
+    repo = RestrictionRepo(mock_session)
+    await repo.create_restriction(
+        user_id=100,
+        restriction_type="mute",
+        restricted_by=1,
+        expires_at=aware_expiry,
+    )
+
+    created = mock_session.add.call_args.args[0]
+    assert created.expires_at.tzinfo is None
+    assert created.expires_at == aware_expiry.replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
 async def test_restriction_repo_remove():
     """remove_restriction should deactivate and commit."""
     from bot.db.repositories.restriction_repo import RestrictionRepo

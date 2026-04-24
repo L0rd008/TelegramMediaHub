@@ -485,9 +485,12 @@ class SendLogCleaner:
 
         from bot.models.send_log import SendLog
 
-        # C-4: Use timezone-aware UTC datetime (datetime.utcnow() is deprecated in 3.12
-        # and causes silent comparison failures against TZ-aware Postgres TIMESTAMPTZ columns).
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=SEND_LOG_MAX_AGE_HOURS)
+        # send_log.sent_at is stored as a naive UTC timestamp in the current schema,
+        # so the cutoff must also be naive to avoid asyncpg "offset-naive and
+        # offset-aware datetimes" failures during cleanup.
+        cutoff = datetime.now(timezone.utc).replace(
+            tzinfo=None
+        ) - timedelta(hours=SEND_LOG_MAX_AGE_HOURS)
         async with async_session() as session:
             result = await session.execute(
                 delete(SendLog).where(SendLog.sent_at < cutoff)

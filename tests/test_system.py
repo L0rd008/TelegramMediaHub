@@ -213,6 +213,24 @@ def test_restriction_count_source_has_expiry_filter():
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 6b. send_log cleanup uses naive UTC cutoff for legacy schema
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_send_log_cleanup_uses_naive_utc_cutoff():
+    """The cleanup query must compare naive timestamps against send_log.sent_at."""
+    import inspect
+
+    from bot.services.distributor import SendLogCleaner
+
+    source = inspect.getsource(SendLogCleaner._cleanup)
+    assert "replace(tzinfo=None)" in source, (
+        "SendLogCleaner._cleanup must normalize the UTC cutoff to a naive "
+        "datetime to match the send_log.sent_at column type"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 7. Edit handler checks user restrictions
 #    (validates system-level fix — edits from muted/banned users dropped)
 # ═══════════════════════════════════════════════════════════════════════

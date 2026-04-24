@@ -10,6 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.models.user_restriction import UserRestriction
 
 
+def _naive_utc_now() -> datetime:
+    """Return naive UTC for comparisons against legacy naive DB columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class RestrictionRepo:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -50,6 +55,9 @@ class RestrictionRepo:
         expires_at: datetime | None = None,
     ) -> UserRestriction:
         """Create a new restriction, deactivating any existing one of the same type."""
+        if expires_at is not None and expires_at.tzinfo is not None:
+            expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+
         # Deactivate previous restrictions of this type
         await self._s.execute(
             update(UserRestriction)
@@ -99,7 +107,7 @@ class RestrictionRepo:
         """
         from sqlalchemy import or_
 
-        now = datetime.now(timezone.utc)
+        now = _naive_utc_now()
         result = await self._s.execute(
             select(UserRestriction.restriction_type, func.count())
             .where(

@@ -24,10 +24,11 @@ from aiogram.types import (
 from bot.services.normalizer import NormalizedMessage
 from bot.services.signature import apply_signature
 from bot.utils.enums import MessageType
+from bot.utils.text import utf16_len as _utf16_len  # Bug 4: canonical UTF-16 helper
 
 logger = logging.getLogger(__name__)
 
-# Limits per Telegram Bot API
+# Limits per Telegram Bot API (in UTF-16 code units)
 TEXT_MAX_LEN = 4096
 CAPTION_MAX_LEN = 1024
 
@@ -53,17 +54,6 @@ async def _get_bot_username(bot: Bot, redis: aioredis.Redis) -> str:
         await redis.set(_BOT_USERNAME_REDIS_KEY, username, ex=_BOT_USERNAME_TTL)
     return username
 
-
-def _utf16_len(s: str) -> int:
-    """Return the number of UTF-16 code units in *s*.
-
-    Telegram Bot API entity offsets and lengths are measured in UTF-16 code
-    units (surrogates).  BMP characters are 1 unit; supplementary / astral
-    characters (e.g. most emoji) are 2 units.  Using Python's len() (which
-    counts Unicode codepoints) gives wrong offsets for strings that contain
-    any astral-plane character before the measured span.
-    """
-    return len(s.encode("utf-16-le")) // 2
 
 
 def _rebuild_entities(raw: list[dict[str, Any]] | None) -> list[MessageEntity] | None:

@@ -21,7 +21,7 @@ MediaHubDistBot
 ```
 
 > This is set during `/newbot`. If already created, usernames cannot be changed.
-> If `MediaHubDistBot` is taken, try: `MediaHubRelayBot`, `MediaHubSyncBot`, or `YourBrandMediaHubBot`.
+> If taken, try: `MediaHubRelayBot`, `MediaHubSyncBot`, or `YourBrandMediaHubBot`.
 
 ---
 
@@ -30,21 +30,18 @@ MediaHubDistBot
 > Set via: `/setdescription` → select your bot → paste the text below
 
 ```
-Post once. It shows up everywhere — as if you sent it yourself.
+You post in one chat. Your audience is in five.
 
-I sync your messages across all your Telegram chats, groups, and channels. Photos, videos, documents, stickers — everything arrives as an original message, not a forward.
+MediaHub syncs your messages across all your connected Telegram chats — automatically, with zero forwarding tags. Photos, videos, voice notes, albums — everything arrives as an original message, not a forward.
 
-What makes me different:
-— Your content looks native in every chat
-— Replies stay threaded across conversations
-— You control what goes where
-— Private — no one sees forwarding tags
-— Works in groups, channels, and private chats
+Reply in any chat and it threads correctly everywhere else.
 
-Just add me and tap /start. You get full access free for 30 days.
+Built for channel + group combos, multi-community networks, and anyone tired of copy-pasting the same content into five different chats.
+
+30 days free. Then about 1 star per hour.
 ```
 
-*Characters: ~451 / 512*
+*Characters: ~468 / 512*
 
 ---
 
@@ -53,10 +50,10 @@ Just add me and tap /start. You get full access free for 30 days.
 > Set via: `/setabouttext` → select your bot → paste the text below
 
 ```
-Sync messages across all your chats — they arrive as originals, not forwards. Try free for 30 days.
+Post once. Shows up in all your chats — not as a forward, as if you sent it there. 30 days free.
 ```
 
-*Characters: ~99 / 120*
+*Characters: ~97 / 120*
 
 ---
 
@@ -65,30 +62,30 @@ Sync messages across all your chats — they arrive as originals, not forwards. 
 > Set via: `/setcommands` → select your bot → paste the block below exactly as-is
 
 ```
-start - Start syncing this chat
-stop - Stop syncing this chat
-selfsend - See your own messages echoed back
-broadcast - Control what you send and receive
-subscribe - Go Premium
-plan - Check your current plan
-stats - See how your chat is doing
-help - Quick guide and command list
-status - Dashboard (admin)
-list - Browse connected chats (admin)
-pause - Pause all syncing (admin)
+start - Connect this chat to your network
+stop - Disconnect and stop syncing
+selfsend - Echo your own messages back to this chat
+broadcast - Control what this chat sends and receives
+subscribe - See plans and go Premium
+plan - Your current plan and days remaining
+stats - Message activity for this chat
+help - How it works + all commands
+status - Live dashboard (admin)
+list - All connected chats (admin)
+pause - Stop all syncing (admin)
 resume - Resume syncing (admin)
-edits - Handle edited messages (admin)
-signature - Set a signature line (admin)
-signatureurl - Set a signature link (admin)
-signatureoff - Remove signature (admin)
-remove - Disconnect a chat (admin)
-grant - Give someone Premium (admin)
-revoke - Remove someone's Premium (admin)
-mute - Temporarily silence a user (admin)
-unmute - Unsilence a user (admin)
-ban - Block a user permanently (admin)
+edits - Handle edited messages across chats (admin)
+signature - Add a signature line to outgoing messages (admin)
+signatureurl - Set the signature as a clickable link (admin)
+signatureoff - Remove the signature (admin)
+remove - Disconnect a chat from the network (admin)
+grant - Give a chat Premium access (admin)
+revoke - Remove a chat's Premium (admin)
+mute - Silence a user across all chats (admin)
+unmute - Lift a mute (admin)
+ban - Permanently block a user (admin)
 unban - Unblock a user (admin)
-whois - Look up a user by name (admin)
+whois - Look up who's behind an alias (admin)
 ```
 
 ---
@@ -102,25 +99,25 @@ whois - Look up a user by name (admin)
 | About | `/setabouttext` | *(see above)* |
 | Commands | `/setcommands` | *(see above)* |
 | Inline mode | `/setinline` | **Off** (not used) |
-| Group privacy | `/setprivacy` | **Disabled** (bot must read all messages) |
+| Group privacy | `/setprivacy` | **Disabled** — bot must read all messages in groups |
 | Join groups | `/setjoingroups` | **Enabled** |
 | Payments | — | **No setup needed** — Telegram Stars works automatically (see below) |
 
-> **Important:** Group privacy **must** be disabled so the bot can read messages in groups, otherwise it will only see commands.
+> **Critical:** Group privacy **must be disabled.** With privacy on, the bot only receives commands and misses all content — nothing gets synced.
 
 ---
 
 ## Telegram Stars Payment Setup
 
-**No BotFather configuration needed.** Telegram Stars is Telegram's built-in virtual currency and is automatically available to every bot — there is no provider to connect.
+**No BotFather configuration needed.**
 
-The payment providers listed under `/mybots` → Payments (Portmone, Smart Glocal, etc.) are for **fiat currency** payments only and are **not** needed for Stars.
+Telegram Stars is Telegram's built-in virtual currency, automatically available to every bot. The payment providers listed under `/mybots` → Payments (Portmone, Stripe, etc.) are for **fiat currency** only and are **not** used here.
 
-Our bot uses `currency="XTR"` in `send_invoice`, which tells Telegram to process the payment as Stars. Everything is handled natively:
+The bot uses `currency="XTR"` in `send_invoice`. The full payment flow is:
 
-1. Bot sends a Stars invoice → Telegram shows the payment UI
-2. User pays with their Star balance
-3. Telegram calls the `pre_checkout_query` → bot approves
-4. Telegram confirms → bot receives `successful_payment` and activates the subscription
+1. User taps `/subscribe` → bot sends a Stars invoice
+2. User pays from their Star balance (Telegram handles the UI)
+3. Telegram sends `pre_checkout_query` → bot approves it
+4. Telegram sends `successful_payment` → bot activates the subscription
 
-**You're all set — just deploy the bot and `/subscribe` will work.**
+**No integration work needed. Deploy and `/subscribe` works.**

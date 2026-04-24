@@ -11,9 +11,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from aiogram import Bot
-from aiogram.enums import ParseMode
 from aiogram.types import (
-    InputMediaAnimation,
     InputMediaAudio,
     InputMediaDocument,
     InputMediaPhoto,
@@ -56,6 +54,18 @@ async def _get_bot_username(bot: Bot, redis: aioredis.Redis) -> str:
     return username
 
 
+def _utf16_len(s: str) -> int:
+    """Return the number of UTF-16 code units in *s*.
+
+    Telegram Bot API entity offsets and lengths are measured in UTF-16 code
+    units (surrogates).  BMP characters are 1 unit; supplementary / astral
+    characters (e.g. most emoji) are 2 units.  Using Python's len() (which
+    counts Unicode codepoints) gives wrong offsets for strings that contain
+    any astral-plane character before the measured span.
+    """
+    return len(s.encode("utf-16-le")) // 2
+
+
 def _rebuild_entities(raw: list[dict[str, Any]] | None) -> list[MessageEntity] | None:
     """Rebuild MessageEntity objects from serialized dicts."""
     if not raw:
@@ -73,20 +83,49 @@ def _rebuild_entities(raw: list[dict[str, Any]] | None) -> list[MessageEntity] |
             kwargs["language"] = d["language"]
         if "custom_emoji_id" in d:
             kwargs["custom_emoji_id"] = d["custom_emoji_id"]
-        # Note: user entities are simplified so we skip them for re-sending
+        # Note: text_mention entities require a live User object which we cannot
+        # reliably reconstruct from a stored dict, so they are intentionally dropped.
         entities.append(MessageEntity(**kwargs))
     return entities or None
+
+
+def _clip_entities(
+    entities: list[MessageEntity] | None, text: str
+) -> list[MessageEntity] | None:
+    """Remove entities that point outside the bounds of *text*.
+
+    When apply_signature truncates content, any entity whose span extends
+    beyond the new text length would cause a TelegramBadRequest.  Entities
+    whose end offset exceeds the text length are dropped entirely; entities
+    that fit within the surviving prefix are kept unchanged.
+    """
+    if not entities:
+        return entities
+    text_utf16 = _utf16_len(text)
+    clipped = [
+        e for e in entities
+        if e.offset + e.length <= text_utf16
+    ]
+    return clipped or None
 
 
 def _build_alias_entity(
     content: str, alias_plain: str, alias_url: str
 ) -> MessageEntity | None:
-    """Find the alias in *content* and return a text_link MessageEntity for it."""
+    """Find the alias in *content* and return a text_link MessageEntity for it.
+
+    Offsets and lengths are expressed in UTF-16 code units as required by the
+    Bot API.  Using Python string indices (len / rfind) gives wrong results
+    when the content contains astral-plane characters (emoji, etc.) because
+    each such character occupies 2 UTF-16 units but only 1 Python codepoint.
+    """
     idx = content.rfind(alias_plain)
     if idx < 0:
         return None
+    offset_utf16 = _utf16_len(content[:idx])
+    length_utf16 = _utf16_len(alias_plain)
     return MessageEntity(
-        type="text_link", offset=idx, length=len(alias_plain), url=alias_url
+        type="text_link", offset=offset_utf16, length=length_utf16, url=alias_url
     )
 
 
@@ -124,6 +163,13 @@ async def send_single(
     text = apply_signature(raw_text, signature, TEXT_MAX_LEN)
     entities = _rebuild_entities(msg.entities)
     caption_entities = _rebuild_entities(msg.caption_entities)
+
+    # Bug 6c: if apply_signature truncated the content, drop entities that now
+    # point outside the (shorter) text — they would cause TelegramBadRequest.
+    if text is not None and text != raw_text:
+        entities = _clip_entities(entities, text)
+    if caption is not None and caption != raw_caption:
+        caption_entities = _clip_entities(caption_entities, caption)
 
     # Append a text_link entity for the alias so it renders as a clickable link
     # regardless of whether the original message had entities.
@@ -292,7 +338,7 @@ async def send_media_group(
     sender_alias: str | None = None,
     redis: aioredis.Redis | None = None,
     allow_paid_broadcast: bool = False,
-) -> Message | None:
+) -> list[Message]:
     """Send a media group (album) to *chat_id*.
 
     Handles type-compatibility splitting per Telegram API:
@@ -302,17 +348,18 @@ async def send_media_group(
     """
     if not msg.group_items:
         logger.warning("Media group with no items, skipping")
-        return None
+        return []
 
     # Single item → send as individual message
     if len(msg.group_items) == 1:
-        return await send_single(
+        result = await send_single(
             bot, msg.group_items[0], chat_id, signature,
             reply_to_message_id=reply_to_message_id,
             sender_alias=sender_alias,
             redis=redis,
             allow_paid_broadcast=allow_paid_broadcast,
         )
+        return [result] if result else []
 
     # Group items by compatible types
     groups = _split_by_compatibility(msg.group_items)
@@ -327,7 +374,7 @@ async def send_media_group(
     elif sender_alias:
         alias_plain = sender_alias
 
-    first_result = None
+    all_results: list[Message] = []
     for group in groups:
         input_media = []
         for i, item in enumerate(group):
@@ -381,20 +428,8 @@ async def send_media_group(
                             show_caption_above_media=item.show_caption_above_media or None,
                         )
                     )
-                case MessageType.ANIMATION:
-                    input_media.append(
-                        InputMediaAnimation(
-                            media=item.file_id,  # type: ignore[arg-type]
-                            caption=cap,
-                            caption_entities=cap_entities,
-                            parse_mode=None,
-                            has_spoiler=item.has_spoiler,
-                            duration=item.duration,
-                            width=item.width,
-                            height=item.height,
-                            show_caption_above_media=item.show_caption_above_media or None,
-                        )
-                    )
+                # Bug 1: ANIMATION is NOT accepted by sendMediaGroup (Bot API only
+                # allows audio, document, photo, video).  Fall through to send_single.
                 case MessageType.AUDIO:
                     input_media.append(
                         InputMediaAudio(
@@ -441,7 +476,7 @@ async def send_media_group(
             # orphaned messages while keeping the first chunk anchored correctly.
             for chunk_start in range(0, len(input_media), 10):
                 chunk = input_media[chunk_start : chunk_start + 10]
-                result = await bot.send_media_group(
+                chunk_results = await bot.send_media_group(
                     chat_id=chat_id,
                     media=chunk,
                     allow_paid_broadcast=allow_paid_broadcast,
@@ -449,20 +484,20 @@ async def send_media_group(
                 )
                 # Only the first chunk gets the reply anchor
                 mg_reply_params = None
-                if first_result is None and result:
-                    first_result = result[0]
+                # Bug 5: collect ALL sent messages so the caller can log each one
+                all_results.extend(chunk_results)
         elif len(input_media) == 1:
             # Single item after splitting – send individually
-            result = await send_single(
+            single = await send_single(
                 bot, group[0], chat_id, signature,
                 sender_alias=sender_alias,
                 redis=redis,
                 allow_paid_broadcast=allow_paid_broadcast,
             )
-            if first_result is None:
-                first_result = result
+            if single:
+                all_results.append(single)
 
-    return first_result
+    return all_results
 
 
 def _split_by_compatibility(
@@ -470,10 +505,14 @@ def _split_by_compatibility(
 ) -> list[list[NormalizedMessage]]:
     """Split items into groups of compatible types for sendMediaGroup.
 
-    - PHOTO, VIDEO, ANIMATION → can mix together
+    Per Bot API docs, sendMediaGroup accepts only InputMediaPhoto, InputMediaVideo,
+    InputMediaAudio, and InputMediaDocument.  InputMediaAnimation is NOT supported
+    and will cause a 400 Bad Request.  ANIMATION items are sent individually.
+
+    - PHOTO, VIDEO → can mix together (visual group)
     - AUDIO → audio only
     - DOCUMENT → documents only
-    - Others → individual sends
+    - ANIMATION and Others → individual sends
     """
     visual: list[NormalizedMessage] = []
     audio: list[NormalizedMessage] = []
@@ -481,13 +520,15 @@ def _split_by_compatibility(
     other: list[NormalizedMessage] = []
 
     for item in items:
-        if item.message_type in (MessageType.PHOTO, MessageType.VIDEO, MessageType.ANIMATION):
+        # Bug 1 fix: ANIMATION excluded from visual group — not valid in sendMediaGroup
+        if item.message_type in (MessageType.PHOTO, MessageType.VIDEO):
             visual.append(item)
         elif item.message_type == MessageType.AUDIO:
             audio.append(item)
         elif item.message_type == MessageType.DOCUMENT:
             documents.append(item)
         else:
+            # ANIMATION, STICKER, VIDEO_NOTE, etc. — all sent individually
             other.append(item)
 
     groups: list[list[NormalizedMessage]] = []
@@ -497,7 +538,7 @@ def _split_by_compatibility(
         groups.append(audio)
     if documents:
         groups.append(documents)
-    # "other" types are sent individually (wrapped in single-item lists)
+    # "other" types (including animation) are sent individually
     for item in other:
         groups.append([item])
 

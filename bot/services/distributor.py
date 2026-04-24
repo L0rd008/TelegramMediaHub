@@ -241,8 +241,23 @@ class Distributor:
             # Log success
             self._rate_limiter.report_success(task.dest_chat_id)
 
-            # Optionally log to send_log for edit tracking
-            if result and result.message_id:
+            # Bug 5 fix: send_media_group now returns list[Message] so we can
+            # log every item, enabling reply threading and ban-cleanup for all
+            # frames in a redistributed album (not just the first).
+            if isinstance(result, list):
+                # MEDIA_GROUP path: log each sent message separately.
+                # group_items is ordered by source_message_id (sorted in
+                # MediaGroupBuffer._flush_group), so zip gives correct pairs.
+                for sent_msg, src_item in zip(result, msg.group_items):
+                    if sent_msg and sent_msg.message_id:
+                        await self._log_send_item(
+                            src_chat_id=src_item.source_chat_id,
+                            src_msg_id=src_item.source_message_id,
+                            src_user_id=src_item.source_user_id,
+                            dest_chat_id=task.dest_chat_id,
+                            dest_message_id=sent_msg.message_id,
+                        )
+            elif result and result.message_id:
                 await self._log_send(msg, task.dest_chat_id, result.message_id)
 
         except TelegramRetryAfter as e:
@@ -383,15 +398,32 @@ class Distributor:
     async def _log_send(
         self, msg: NormalizedMessage, dest_chat_id: int, dest_message_id: int
     ) -> None:
-        """Log the send to send_log table."""
+        """Log a single-message send to send_log."""
+        await self._log_send_item(
+            src_chat_id=msg.source_chat_id,
+            src_msg_id=msg.source_message_id,
+            src_user_id=msg.source_user_id,
+            dest_chat_id=dest_chat_id,
+            dest_message_id=dest_message_id,
+        )
+
+    async def _log_send_item(
+        self,
+        src_chat_id: int,
+        src_msg_id: int,
+        src_user_id: int | None,
+        dest_chat_id: int,
+        dest_message_id: int,
+    ) -> None:
+        """Insert one row into send_log."""
         try:
             from bot.models.send_log import SendLog
 
             async with async_session() as session:
                 log = SendLog(
-                    source_chat_id=msg.source_chat_id,
-                    source_message_id=msg.source_message_id,
-                    source_user_id=msg.source_user_id,
+                    source_chat_id=src_chat_id,
+                    source_message_id=src_msg_id,
+                    source_user_id=src_user_id,
                     dest_chat_id=dest_chat_id,
                     dest_message_id=dest_message_id,
                 )

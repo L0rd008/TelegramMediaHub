@@ -220,14 +220,28 @@ class Distributor:
             # Build signature (M-4: Redis-cached to avoid per-message DB reads)
             signature = await self._get_signature()
 
-            # Look up sender alias
+            # Look up sender alias (user pseudonym) OR derive chat attribution label
             sender_alias: str | None = None
+            source_chat_label: str | None = None
+            source_chat_url: str | None = None
+
             if msg.source_user_id:
+                # Regular user message → resolve pseudonym alias
                 from bot.services.alias import get_alias
                 try:
                     sender_alias = await get_alias(self._redis, msg.source_user_id)
                 except Exception as e:
                     logger.debug("Failed to resolve alias for user %d: %s", msg.source_user_id, e)
+            else:
+                # Channel post or anonymous admin → show source chat identity
+                # (Bug 3 fix: source_chat_username / source_chat_title are populated
+                # by the normalizer when from_user is None or is GroupAnonymousBot)
+                if msg.source_chat_username:
+                    source_chat_label = f"@{msg.source_chat_username}"
+                    source_chat_url = f"https://t.me/{msg.source_chat_username}"
+                elif msg.source_chat_title:
+                    source_chat_label = msg.source_chat_title
+                    source_chat_url = None
 
             # Send — pass redis for C-1 (bot username cache) and H-1 (paid broadcast)
             result = await send_single(
@@ -236,6 +250,8 @@ class Distributor:
                 sender_alias=sender_alias,
                 redis=self._redis,
                 allow_paid_broadcast=allow_paid,
+                source_chat_label=source_chat_label,
+                source_chat_url=source_chat_url,
             )
 
             # Log success

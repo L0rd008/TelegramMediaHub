@@ -12,6 +12,12 @@ from bot.utils.enums import MessageType
 
 logger = logging.getLogger(__name__)
 
+# Telegram's internal "GroupAnonymousBot" user ID.
+# When an admin posts anonymously in a group, from_user is set to this fake
+# bot rather than to the real admin.  We treat it the same as from_user=None
+# (i.e. attribute the message to the chat, not to a user alias).
+_ANON_ADMIN_BOT_ID = 1087968824
+
 
 @dataclass
 class NormalizedMessage:
@@ -50,6 +56,12 @@ class NormalizedMessage:
 
     # Sender identity (None for channel posts without from_user)
     source_user_id: int | None = None
+
+    # Source-chat attribution – populated when source_user_id is None
+    # (channel posts, anonymous admin posts).  Used as the visible attribution
+    # label in the redistributed message when no user alias is available.
+    source_chat_title: str | None = None
+    source_chat_username: str | None = None
 
     # Reply threading – set by the message handler after send_log reverse lookup
     reply_source_chat_id: int | None = None
@@ -91,10 +103,42 @@ def normalize(message: Message) -> NormalizedMessage | None:
         logger.debug("Skipping paid media message %d", message.message_id)
         return None
 
+    # ── Determine sender identity ─────────────────────────────────────
+    # For regular user messages from_user holds the actual sender.
+    # For channel posts and anonymous-admin group posts, from_user is
+    # absent or is Telegram's internal GroupAnonymousBot (id 1087968824).
+    # In those cases we attribute the message to the originating chat so
+    # recipients can see which channel/group the content came from.
+    from_user = message.from_user
+    sender_chat = message.sender_chat  # set for channel posts and anon admins
+
+    is_anon = (
+        from_user is None
+        or from_user.id == _ANON_ADMIN_BOT_ID
+    )
+
+    if not is_anon:
+        source_user_id: int | None = from_user.id
+        source_chat_title: str | None = None
+        source_chat_username: str | None = None
+    else:
+        source_user_id = None
+        # Prefer sender_chat (set for anon admins and channel posts forwarded
+        # to discussion groups); fall back to message.chat itself.
+        attr_chat = sender_chat or message.chat
+        raw_title = getattr(attr_chat, "title", None)
+        raw_username = getattr(attr_chat, "username", None)
+        # Normalise: strip any leading @ the API might include (it doesn't, but
+        # be defensive so downstream code can always prepend @ safely).
+        source_chat_title = raw_title
+        source_chat_username = raw_username.lstrip("@") if raw_username else None
+
     base = dict(
         source_chat_id=message.chat.id,
         source_message_id=message.message_id,
-        source_user_id=message.from_user.id if message.from_user else None,
+        source_user_id=source_user_id,
+        source_chat_title=source_chat_title,
+        source_chat_username=source_chat_username,
         media_group_id=message.media_group_id,
         show_caption_above_media=bool(getattr(message, "show_caption_above_media", False)),
     )

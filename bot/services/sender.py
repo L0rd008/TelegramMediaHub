@@ -128,48 +128,75 @@ async def send_single(
     sender_alias: str | None = None,
     redis: aioredis.Redis | None = None,
     allow_paid_broadcast: bool = False,
+    source_chat_label: str | None = None,
+    source_chat_url: str | None = None,
 ) -> Message | None:
-    """Send a single NormalizedMessage to *chat_id*. Returns the sent Message."""
+    """Send a single NormalizedMessage to *chat_id*. Returns the sent Message.
 
-    # Resolve alias as plain text + URL (never HTML — avoids entity/parse_mode conflict)
-    alias_plain = ""
-    alias_url = ""
-    if sender_alias and redis:
-        bot_uname = await _get_bot_username(bot, redis)
-        alias_plain = sender_alias
-        alias_url = f"https://t.me/{bot_uname}" if bot_uname else ""
-    elif sender_alias:
-        # redis not available — alias text only, no link
-        alias_plain = sender_alias
+    Attribution label priority:
+      1. sender_alias  – user pseudonym (e.g. "golden_arrow") → links to bot
+      2. source_chat_label – channel/anon-admin chat name    → links to chat URL
+      3. Nothing (sticker, video note, or no registration)
 
-    if alias_plain:
-        raw_text = f"{msg.text}\n\n{alias_plain}" if msg.text else msg.text
-        raw_caption = f"{msg.caption}\n\n{alias_plain}" if msg.caption else alias_plain
+    UI 1+2: attribution is combined with the signature onto a single line:
+      "↗ golden_arrow · — via @MediaHubDistBot"
+    This replaces the previous two-paragraph format.
+    """
+
+    # ── Determine attribution label and URL ──────────────────────────────────
+    # Bug 3 fix: fall back to source chat identity when no user alias exists
+    # (channel posts, anonymous admin posts).
+    attr_label = ""
+    attr_url = ""
+
+    if sender_alias:
+        attr_label = sender_alias
+        if redis:
+            bot_uname = await _get_bot_username(bot, redis)
+            attr_url = f"https://t.me/{bot_uname}" if bot_uname else ""
+        # attr_url stays "" when redis unavailable; alias still shown as plain text
+    elif source_chat_label:
+        attr_label = source_chat_label
+        attr_url = source_chat_url or ""
+
+    # ── Build combined attribution line (UI 1+2) ─────────────────────────────
+    # Format: "↗ {label} · {signature}"  (one line, not two paragraphs)
+    # The ↗ prefix visually marks attribution; · separates label from sig.
+    if attr_label and signature:
+        attribution = f"↗ {attr_label} · {signature}"
+    elif attr_label:
+        attribution = f"↗ {attr_label}"
     else:
-        raw_text = msg.text
-        raw_caption = msg.caption
+        attribution = signature  # no label — fall back to plain signature
 
-    caption = apply_signature(raw_caption, signature, CAPTION_MAX_LEN)
-    text = apply_signature(raw_text, signature, TEXT_MAX_LEN)
+    # ── Apply attribution as the full "signature" argument ───────────────────
+    # apply_signature handles: length limits (UTF-16 aware), content truncation,
+    # None-safety, and the \n\n separator.
+    raw_text = msg.text
+    raw_caption = msg.caption
+
+    text = apply_signature(raw_text, attribution, TEXT_MAX_LEN)
+    caption = apply_signature(raw_caption, attribution, CAPTION_MAX_LEN)
+
     entities = _rebuild_entities(msg.entities)
     caption_entities = _rebuild_entities(msg.caption_entities)
 
-    # Bug 6c: if apply_signature truncated the content, drop entities that now
-    # point outside the (shorter) text — they would cause TelegramBadRequest.
+    # Drop entities that now point outside the (possibly truncated) text
     if text is not None and text != raw_text:
         entities = _clip_entities(entities, text)
     if caption is not None and caption != raw_caption:
         caption_entities = _clip_entities(caption_entities, caption)
 
-    # Append a text_link entity for the alias so it renders as a clickable link
-    # regardless of whether the original message had entities.
-    if alias_plain and alias_url:
+    # Add a text_link entity for the attribution label so it is clickable.
+    # _build_alias_entity uses rfind so it targets the attribution-line
+    # occurrence (last in text) even if the label also appears in the body.
+    if attr_label and attr_url:
         if text:
-            ent = _build_alias_entity(text, alias_plain, alias_url)
+            ent = _build_alias_entity(text, attr_label, attr_url)
             if ent:
                 entities = (entities or []) + [ent]
         if caption:
-            ent = _build_alias_entity(caption, alias_plain, alias_url)
+            ent = _build_alias_entity(caption, attr_label, attr_url)
             if ent:
                 caption_entities = (caption_entities or []) + [ent]
 
@@ -303,6 +330,8 @@ async def send_single(
                     sender_alias=sender_alias,
                     redis=redis,
                     allow_paid_broadcast=allow_paid_broadcast,
+                    source_chat_label=source_chat_label,
+                    source_chat_url=source_chat_url,
                 )
 
             case _:
@@ -328,6 +357,8 @@ async def send_media_group(
     sender_alias: str | None = None,
     redis: aioredis.Redis | None = None,
     allow_paid_broadcast: bool = False,
+    source_chat_label: str | None = None,
+    source_chat_url: str | None = None,
 ) -> list[Message]:
     """Send a media group (album) to *chat_id*.
 
@@ -335,6 +366,7 @@ async def send_media_group(
     - Photos and videos can be mixed freely
     - Audio can only be grouped with other audio
     - Documents can only be grouped with other documents
+    - Animations, stickers, video notes → sent individually via send_single
     """
     if not msg.group_items:
         logger.warning("Media group with no items, skipping")
@@ -348,47 +380,57 @@ async def send_media_group(
             sender_alias=sender_alias,
             redis=redis,
             allow_paid_broadcast=allow_paid_broadcast,
+            source_chat_label=source_chat_label,
+            source_chat_url=source_chat_url,
         )
         return [result] if result else []
 
     # Group items by compatible types
     groups = _split_by_compatibility(msg.group_items)
 
-    # Resolve alias as plain text + URL (entity-based, never HTML)
-    alias_plain = ""
-    alias_url = ""
-    if sender_alias and redis:
-        bot_uname = await _get_bot_username(bot, redis)
-        alias_plain = sender_alias
-        alias_url = f"https://t.me/{bot_uname}" if bot_uname else ""
-    elif sender_alias:
-        alias_plain = sender_alias
+    # ── Attribution setup (mirrors send_single logic) ─────────────────────────
+    # Bug 3 fix: use source_chat_label when sender_alias is absent.
+    attr_label = ""
+    attr_url = ""
+    if sender_alias:
+        attr_label = sender_alias
+        if redis:
+            bot_uname = await _get_bot_username(bot, redis)
+            attr_url = f"https://t.me/{bot_uname}" if bot_uname else ""
+    elif source_chat_label:
+        attr_label = source_chat_label
+        attr_url = source_chat_url or ""
+
+    # Build combined attribution line (UI 1+2, same format as send_single)
+    if attr_label and signature:
+        attribution = f"↗ {attr_label} · {signature}"
+    elif attr_label:
+        attribution = f"↗ {attr_label}"
+    else:
+        attribution = signature  # plain signature, no label prefix
 
     all_results: list[Message] = []
     for group in groups:
         input_media = []
         for i, item in enumerate(group):
-            # C-3: Build caption/entities correctly for every item in the group.
-            # Only the first item of the entire album receives the alias + signature;
-            # all other items preserve their own original caption and entities.
-            if i == 0 and alias_plain:
-                raw_cap = f"{item.caption}\n\n{alias_plain}" if item.caption else alias_plain
-            else:
-                raw_cap = item.caption
-
             if i == 0:
-                cap = apply_signature(raw_cap, signature, CAPTION_MAX_LEN)
+                # First item of the album: apply attribution (label + signature).
+                cap = apply_signature(item.caption, attribution, CAPTION_MAX_LEN)
+                cap_entities = _rebuild_entities(item.caption_entities)
+
+                # Clip entities that now fall outside the (possibly truncated) caption
+                if cap is not None and cap != item.caption:
+                    cap_entities = _clip_entities(cap_entities, cap)
+
+                # Add text_link entity for the attribution label
+                if attr_label and attr_url and cap:
+                    ent = _build_alias_entity(cap, attr_label, attr_url)
+                    if ent:
+                        cap_entities = (cap_entities or []) + [ent]
             else:
-                cap = item.caption  # preserve original caption verbatim
-
-            # Rebuild entities for every item (not just the first)
-            cap_entities = _rebuild_entities(item.caption_entities)
-
-            # Add alias entity to the first item's caption
-            if i == 0 and alias_plain and alias_url and cap:
-                ent = _build_alias_entity(cap, alias_plain, alias_url)
-                if ent:
-                    cap_entities = (cap_entities or []) + [ent]
+                # Subsequent items: preserve original caption and entities verbatim.
+                cap = item.caption
+                cap_entities = _rebuild_entities(item.caption_entities)
 
             match item.message_type:
                 case MessageType.PHOTO:
@@ -418,8 +460,6 @@ async def send_media_group(
                             show_caption_above_media=item.show_caption_above_media or None,
                         )
                     )
-                # Bug 1: ANIMATION is NOT accepted by sendMediaGroup (Bot API only
-                # allows audio, document, photo, video).  Fall through to send_single.
                 case MessageType.AUDIO:
                     input_media.append(
                         InputMediaAudio(
@@ -442,16 +482,25 @@ async def send_media_group(
                         )
                     )
                 case _:
-                    # Fallback: send as individual message
-                    await send_single(
-                        bot, item, chat_id, signature if i == 0 else None,
+                    # ANIMATION, STICKER, VIDEO_NOTE etc. are not valid in
+                    # sendMediaGroup.  Send individually and collect the result.
+                    # Bug 2 fix: was `await send_single(...)` with discarded result.
+                    # The missing append meant these messages were never logged to
+                    # send_log, breaking reply threading and ban-cleanup for them.
+                    fallback_result = await send_single(
+                        bot, item, chat_id,
+                        signature if i == 0 else None,
                         sender_alias=sender_alias if i == 0 else None,
                         redis=redis,
                         allow_paid_broadcast=allow_paid_broadcast,
+                        source_chat_label=source_chat_label if i == 0 else None,
+                        source_chat_url=source_chat_url if i == 0 else None,
                     )
+                    if fallback_result:
+                        all_results.append(fallback_result)  # Bug 2 fix
                     continue
 
-        # Build reply_parameters for media groups
+        # Build reply_parameters for the media group batch
         mg_reply_params: ReplyParameters | None = None
         if reply_to_message_id:
             mg_reply_params = ReplyParameters(
@@ -461,9 +510,8 @@ async def send_media_group(
 
         if len(input_media) >= 2:
             # Send in chunks of 10 (Telegram limit).
-            # M-6 (known limitation): only the first chunk carries reply_parameters;
-            # subsequent chunks are sent without a reply reference to avoid floating
-            # orphaned messages while keeping the first chunk anchored correctly.
+            # Only the first chunk carries reply_parameters; subsequent chunks
+            # are sent without a reply anchor to avoid floating orphaned messages.
             for chunk_start in range(0, len(input_media), 10):
                 chunk = input_media[chunk_start : chunk_start + 10]
                 chunk_results = await bot.send_media_group(
@@ -472,17 +520,17 @@ async def send_media_group(
                     allow_paid_broadcast=allow_paid_broadcast,
                     reply_parameters=mg_reply_params,
                 )
-                # Only the first chunk gets the reply anchor
-                mg_reply_params = None
-                # Bug 5: collect ALL sent messages so the caller can log each one
+                mg_reply_params = None  # Only first chunk is anchored
                 all_results.extend(chunk_results)
         elif len(input_media) == 1:
-            # Single item after splitting – send individually
+            # Single item after compatibility split – send individually
             single = await send_single(
                 bot, group[0], chat_id, signature,
                 sender_alias=sender_alias,
                 redis=redis,
                 allow_paid_broadcast=allow_paid_broadcast,
+                source_chat_label=source_chat_label,
+                source_chat_url=source_chat_url,
             )
             if single:
                 all_results.append(single)

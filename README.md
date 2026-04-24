@@ -8,12 +8,13 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 
 ### Content Redistribution
 - **All media types** — text, photo, video, animation/GIF, audio, document, voice, video note, sticker
-- **Album support** — media groups are buffered in Redis and redistributed as intact albums
+- **Album support** — media groups are buffered in Redis and redistributed as intact albums (photo + video); animations are always sent individually since `sendMediaGroup` does not accept `InputMediaAnimation`
 - **Privacy first** — never uses `forwardMessage` or `copyMessage`; always re-sends via `send*` with `file_id` reuse, so no forwarding metadata appears
 - **Edit redistribution** — optionally re-send edited messages (configurable: `off` or `resend`)
 
 ### Reply Threading
 - **Cross-chat replies** — when a user replies to a bot-sent message in any chat, the reply is distributed to all other chats **as a Telegram Reply** to the corresponding message in each destination
+- **Full album threading** — every frame in a redistributed album is individually logged to `send_log`, so replying to any photo or video in the album (not just the first) resolves correctly
 - **Reverse lookup** — uses the `send_log` table to map `(dest_chat_id, dest_message_id)` back to the original source, then resolves the bot's message in each destination
 - **Graceful degradation** — uses `allow_sending_without_reply=True` so replies still send even if the target message was deleted or pruned from the 48-hour send_log window
 
@@ -25,18 +26,20 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 ### Moderation & Aliases
 - **Readable aliases** — each user gets a persistent two-word pseudonym (e.g. `golden_arrow`) that appears as a clickable link to the bot on every redistributed message
 - **Alias on every message** — text messages, photos, videos, animations, audio, documents, and voice messages all carry the sender's alias; stickers and video notes are excluded (no caption support)
+- **Correct entity offsets** — alias link entities use UTF-16 code unit offsets as required by the Bot API, so emoji and other astral-plane characters before the alias do not shift the link
 - **Mute (admin)** — `/mute <user_id|reply> <duration>` silences a user for a specified time (30m, 2h, 7d, etc.)
 - **Ban (admin)** — `/ban <user_id|reply>` permanently blocks a user with the choice to delete all their past messages or keep them
-- **Reply-based targeting** — all admin commands that accept a user ID also work by replying to a message
+- **Reply-based targeting** — admin commands that target a **user** (mute, ban, unmute, unban, whois) resolve `from_user.id`; commands that target a **chat** (remove, grant, revoke) correctly resolve `sender_chat.id` for channels/groups or fall back to `from_user.id` for private chats
 - **Alias lookup** — `/whois <name>` reveals the user behind a pseudonym and shows any active restrictions (spaces and underscores interchangeable)
 
 ### Deduplication
 - Content fingerprinting using `file_unique_id` (media) or SHA-256 (text)
 - 24-hour Redis TTL prevents re-processing identical content
+- Per-item atomic Redis `SET NX` fingerprinting for media group frames prevents duplicate album ingestion on webhook retries
 - Self-message middleware drops the bot's own messages to prevent redistribution loops
 
 ### Rate Limiting & Resilience
-- **Global token bucket** — 25 messages/second via Redis sorted set
+- **Global token bucket** — 25 messages/second via atomic Redis Lua script (TOCTOU-safe across multiple workers)
 - **Per-chat cooldown** — 1 s for private/channels, 3 s for groups/supergroups
 - **429 backoff** — automatic `retry_after` sleep and re-enqueue (up to 3 retries)
 - **Circuit breaker** — per-chat pause after 3 consecutive errors (5 min), global pause after 5× 429 in 60 s (30 s)
@@ -51,6 +54,7 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Trial reminders** — background task sends 7-day, 3-day, 1-day warnings
 - **Subscription stacking** — buying a second plan extends from the current expiry date
 - **Cached premium checks** — Redis-backed with 5-min TTL to avoid DB round-trips
+- **Paid broadcast** — `allow_paid_broadcast` flag (Bot API 9.6) toggleable via `config:allow_paid_broadcast` Redis key, defaults to `false`
 
 ### Interactive Buttons
 - **Button-driven interface** — every command provides inline keyboard buttons for quick actions
@@ -63,14 +67,15 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 
 ### Administration
 - **Auto-registration** — bot auto-registers chats upon being added as member or admin (`my_chat_member`)
-- **Configurable signature** — appended to messages, respects API char limits (4 096 text / 1 024 caption)
+- **Configurable signature** — entity-safe, appended to messages respecting API char limits (4 096 text / 1 024 caption); entities that overflow truncated content are automatically dropped
 - **Paginated chat list** — browse active chats with role flags and inline pagination
 - **Health endpoint** — `GET /health` returns queue size and Redis status (webhook mode)
+- **Bot API 9.6** — handles `ManagedBotCreated`, `ManagedBotPaused`, `ManagedBotResumed` update types
 
 ### Infrastructure
 - **Dual-mode** — long-polling (dev) or webhook with aiohttp (prod)
 - **Async PostgreSQL** — via SQLAlchemy 2.0 async + asyncpg, connection pooling (20 + 10 overflow)
-- **Redis** — dedup cache, rate-limit state, media-group buffer, subscription cache, nudge cooldowns
+- **Redis** — dedup cache, rate-limit state, media-group buffer, subscription cache, nudge cooldowns, bot username cache (1 h TTL), signature cache (30 s TTL)
 - **Alembic migrations** — versioned schema evolution
 - **Docker Compose** — one-command deploy with health-checked Postgres 16 and Redis 7
 - **Send-log cleanup** — background task prunes `send_log` rows older than 48 h (hourly)
@@ -125,6 +130,8 @@ python -m bot
 | `WEBHOOK_SECRET` | No | — | Secret token for webhook verification |
 | `LOCAL_API_URL` | No | — | Local Bot API server URL (optional, for large files) |
 
+> **Redis runtime config** — `allow_paid_broadcast` is toggled at runtime via the `config:allow_paid_broadcast` Redis key (set to `"true"` / `"false"`), not an env var, so no restart is needed when changing it.
+
 ---
 
 ## 🤖 Bot Commands
@@ -154,14 +161,16 @@ python -m bot
 | `/pause` | Pause all syncing |
 | `/resume` | Resume syncing |
 | `/edits [off\|resend]` | Handle edited messages |
-| `/remove <chat_id\|reply>` | Disconnect a chat |
-| `/grant <chat_id> <plan>` or reply + `/grant <plan>` | Give someone Premium |
-| `/revoke <chat_id\|reply>` | Remove someone's Premium |
-| `/mute <user_id\|reply> [duration]` | Temporarily silence a user |
+| `/remove <chat_id\|reply>` | Disconnect a chat (reply resolves the **chat** that sent the message) |
+| `/grant <chat_id> <plan>` or reply + `/grant <plan>` | Give someone Premium (reply resolves **chat_id**) |
+| `/revoke <chat_id\|reply>` | Remove someone's Premium (reply resolves **chat_id**) |
+| `/mute <user_id\|reply> [duration]` | Temporarily silence a user (reply resolves **user_id**) |
 | `/unmute <user_id\|reply>` | Unsilence a user |
 | `/ban <user_id\|reply>` | Permanently block a user (with or without message deletion) |
 | `/unban <user_id\|reply>` | Unblock a user |
 | `/whois <name>` | Look up a user by their alias name |
+
+> **Reply targeting note:** Commands that operate on a *chat* (remove, grant, revoke) read `sender_chat.id` for channel/group posts. Commands that operate on a *user* (mute, ban, unmute, unban) read `from_user.id`. Both fall back to a `send_log` reverse lookup when replying to a bot-sent message.
 
 ---
 
@@ -180,7 +189,7 @@ TelegramMediaHub/
 │   │   └── repositories/
 │   │       ├── chat_repo.py     # Chat CRUD (upsert, deactivate, migrate, toggle)
 │   │       ├── config_repo.py   # Key-value config CRUD
-│   │       ├── send_log_repo.py # Reverse lookup + dest resolution for reply threading + moderation
+│   │       ├── send_log_repo.py # Reverse lookup (source_user_id + source_chat_id) for reply threading + moderation
 │   │       ├── alias_repo.py    # User alias CRUD (get_or_create, lookup_by_alias)
 │   │       ├── restriction_repo.py  # Mute/ban restriction CRUD
 │   │       └── subscription_repo.py  # Subscription CRUD + trial queries
@@ -188,7 +197,7 @@ TelegramMediaHub/
 │   ├── models/
 │   │   ├── chat.py              # Chat registry (with partial index)
 │   │   ├── bot_config.py        # Key-value runtime config
-│   │   ├── send_log.py          # Source → dest mapping (edits + reply threading + user tracking)
+│   │   ├── send_log.py          # Source → dest mapping (edits + reply threading + user tracking); one row per sent message including each album frame
 │   │   ├── user_alias.py        # Persistent user pseudonyms
 │   │   ├── user_restriction.py  # Mute/ban records
 │   │   └── subscription.py      # Telegram Stars subscriptions
@@ -196,11 +205,11 @@ TelegramMediaHub/
 │   ├── services/
 │   │   ├── normalizer.py        # Message → NormalizedMessage (9 types + source_user_id)
 │   │   ├── dedup.py             # Fingerprinting + Redis seen-cache
-│   │   ├── rate_limiter.py      # Token bucket + circuit breaker
-│   │   ├── sender.py            # NormalizedMessage → Bot API send* (with reply_parameters + alias)
-│   │   ├── distributor.py       # Fan-out worker pool + paywall + reply resolve + alias + SendLogCleaner
-│   │   ├── media_group.py       # Album buffer + auto-flusher
-│   │   ├── signature.py         # Promotional signature appender
+│   │   ├── rate_limiter.py      # Atomic Lua token bucket + per-chat cooldown + circuit breaker
+│   │   ├── sender.py            # NormalizedMessage → Bot API send* (UTF-16 entity offsets, entity clipping, alias link)
+│   │   ├── distributor.py       # Fan-out worker pool + paywall + reply resolve + alias + SendLogCleaner; logs all album frames
+│   │   ├── media_group.py       # Album buffer + atomic flush lock (multi-process safe)
+│   │   ├── signature.py         # Promotional signature appender (respects char limits)
 │   │   ├── keyboards.py         # Centralized inline keyboard builders for all commands
 │   │   ├── alias.py             # Sender alias service (cached Redis lookup + clickable link formatting)
 │   │   ├── alias_words.py       # Adjective/noun word lists for readable alias generation
@@ -210,11 +219,12 @@ TelegramMediaHub/
 │   ├── handlers/
 │   │   ├── membership.py        # my_chat_member auto-registration
 │   │   ├── start.py             # /start, /stop, /selfsend, /broadcast, /stats (with button panels)
-│   │   ├── admin.py             # Admin commands + moderation (with action buttons)
-│   │   ├── callbacks.py         # Unified callback query handler for all non-subscription buttons
+│   │   ├── admin.py             # Admin commands + moderation; _resolve_target_chat for chat ops, _resolve_target_user for user ops
+│   │   ├── callbacks.py         # Unified callback query handler (all parse_mode=HTML set explicitly)
 │   │   ├── subscription.py      # /subscribe, /plan, payment callbacks
-│   │   ├── edits.py             # Edit redistribution
-│   │   └── messages.py          # Content redistribution pipeline + reply detection + restriction check
+│   │   ├── edits.py             # Edit redistribution (source-side premium check)
+│   │   ├── messages.py          # Content redistribution pipeline + reply detection + restriction check
+│   │   └── managed_bot.py       # Bot API 9.6 ManagedBot* event stubs
 │   │
 │   ├── middleware/
 │   │   ├── db_session_mw.py     # DB session injection
@@ -236,7 +246,8 @@ TelegramMediaHub/
 │       └── 005_readable_aliases.py  # Widen alias column + regenerate to two-word format
 │
 ├── docs/
-│   └── botfather-setup.md      # BotFather configuration guide
+│   ├── botfather-setup.md      # BotFather configuration guide
+│   └── operations-runbook.md   # Hetzner deployment and ops guide
 ├── alembic.ini
 ├── requirements.txt
 ├── Dockerfile
@@ -252,8 +263,8 @@ TelegramMediaHub/
 | Table | Purpose |
 |---|---|
 | `chats` | Registry of all known chats (with `active`, `is_source`, `is_destination` flags) |
-| `bot_config` | Key-value store for runtime config (signature, pause state, edit mode) |
-| `send_log` | Tracks source→destination message mapping for edits, reply threading, and moderation (48 h retention, triple-indexed) |
+| `bot_config` | Key-value store for runtime config (signature, pause state, edit mode, allow_paid_broadcast) |
+| `send_log` | Tracks source→destination message mapping for edits, reply threading, and moderation (48 h retention, triple-indexed). **One row per sent message** — every frame in a redistributed album has its own row. |
 | `subscriptions` | Telegram Stars payment records with plan, expiry, and charge ID |
 | `user_aliases` | Persistent random pseudonyms for sender identification (user_id → alias) |
 | `user_restrictions` | Mute/ban records with type, expiry, and admin who issued it |
@@ -275,7 +286,7 @@ messages_router
   ├─ Restriction check: is_user_restricted? → drop if muted/banned
   ├─ normalize() → NormalizedMessage (or skip unsupported types)
   ├─ is_active_source? → drop if chat not registered
-  ├─ media_group_id? → buffer in Redis (flush after 1s inactivity)
+  ├─ media_group_id? → per-item SET NX dedup, then buffer in Redis (atomic flush after 1s)
   ├─ is_duplicate? → drop if fingerprint seen in last 24h
   ├─ Reply detection: is reply to bot message? → reverse lookup in send_log
   │
@@ -293,11 +304,14 @@ distributor.distribute()
   ▼
 Worker pool (configurable, default 10)
   │
-  ├─ Rate limiter: global token bucket + per-chat cooldown
-  ├─ Build signature from config
-  ├─ Resolve sender alias (cached in Redis)
-  ├─ send_single() → correct Bot API send* call (with reply_parameters + alias tag)
-  ├─ Log to send_log (with source_user_id)
+  ├─ Rate limiter: atomic Lua token bucket (25 msg/s) + per-chat cooldown
+  ├─ Build signature from config (Redis-cached 30 s)
+  ├─ Resolve sender alias (Redis-cached)
+  ├─ send_single() or send_media_group() → correct Bot API send* call
+  │   ├─ ANIMATION always sent individually (not via sendMediaGroup)
+  │   ├─ Entity offsets computed in UTF-16 code units
+  │   └─ Entities clipped if signature truncated content
+  ├─ Log to send_log: one row per message; albums log every frame
   │
   └─ Error handling:
       ├─ 429 → sleep retry_after, re-enqueue

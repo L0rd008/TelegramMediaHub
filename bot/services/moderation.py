@@ -15,9 +15,12 @@ logger = logging.getLogger(__name__)
 
 RESTRICT_CACHE_TTL = 300  # 5 minutes
 
-# Pattern for duration strings like "30m", "2h", "7d", "1d12h", "24h30m"
+# Pattern for duration strings like "30m", "2h", "7d", "1d12h", "24h30m".
+# L-2: The positive lookahead (?=\d) ensures at least one component is present;
+# the old pattern matched the empty string (all groups optional), which was
+# caught only by the downstream all-zero guard.
 _DURATION_RE = re.compile(
-    r"(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$", re.IGNORECASE
+    r"^(?=\d)(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$", re.IGNORECASE
 )
 
 

@@ -102,8 +102,21 @@ class MediaGroupBuffer:
                 break
 
     async def _flush_group(self, media_group_id: str) -> None:
-        """Flush a complete media group to the distributor."""
+        """Flush a complete media group to the distributor.
+
+        L-5: An atomic SET NX flushing-lock prevents duplicate flushes if two
+        bot processes (or two flusher ticks) both find lock_exists == False for
+        the same group simultaneously.  Only the process that wins the NX lock
+        reads and deletes the buffer; the other gets an empty list and no-ops.
+        """
         key = f"mgbuf:{media_group_id}"
+        flush_lock_key = f"mgflushing:{media_group_id}"
+
+        # Try to claim the exclusive flush lock (TTL 10s as a safety valve)
+        claimed = await self._redis.set(flush_lock_key, "1", ex=10, nx=True)
+        if not claimed:
+            # Another process or tick is already flushing this group
+            return
 
         # Pop all items atomically
         pipe = self._redis.pipeline()
@@ -113,6 +126,7 @@ class MediaGroupBuffer:
         raw_items = results[0]
 
         if not raw_items:
+            await self._redis.delete(flush_lock_key)
             return
 
         # Deserialize and sort by source_message_id
@@ -142,6 +156,9 @@ class MediaGroupBuffer:
         # Distribute
         await self._distributor.distribute(composite)
 
+        # Release the flush lock after successful dispatch
+        await self._redis.delete(flush_lock_key)
+
     @staticmethod
     def _to_dict(msg: NormalizedMessage) -> dict:
         """Serialize NormalizedMessage to dict (without nested group_items)."""
@@ -159,6 +176,10 @@ class MediaGroupBuffer:
 
 
 # ── Singleton accessor ────────────────────────────────────────────────
+# M-3: The singleton is initialised eagerly in app.py's _on_startup() AFTER the
+# Distributor is available and BEFORE any handlers are registered.  The ordering
+# is enforced by the startup lifecycle; do not call get_media_group_buffer()
+# without arguments before app startup completes.
 
 _buffer: MediaGroupBuffer | None = None
 
@@ -173,3 +194,11 @@ def get_media_group_buffer(
             raise RuntimeError("MediaGroupBuffer not initialized")
         _buffer = MediaGroupBuffer(redis, distributor)
     return _buffer
+
+
+# ── Test helpers ──────────────────────────────────────────────────────
+
+def _reset_media_group_buffer_for_testing() -> None:
+    """L-1: Reset the MediaGroupBuffer singleton. For use in tests only."""
+    global _buffer
+    _buffer = None

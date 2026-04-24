@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -40,10 +41,8 @@ class TestCircuitBreaker:
         rl.report_error(100)
         assert 100 not in rl._chat_paused_until
         rl.report_error(100)
-        # After 3 errors, chat should be paused
         assert 100 in rl._chat_paused_until
         assert rl._chat_paused_until[100] > time.time()
-        # Error count should reset after triggering pause
         assert rl._chat_errors.get(100, 0) == 0
 
     def test_five_429s_trigger_global_pause(self, fake_redis):
@@ -52,22 +51,19 @@ class TestCircuitBreaker:
             rl.report_429(5.0)
         assert rl._global_paused_until == 0
         rl.report_429(5.0)
-        # After 5× 429 in <60s, global pause should activate
         assert rl._global_paused_until > time.time()
 
     def test_old_429s_pruned(self, fake_redis):
         rl = RateLimiter(fake_redis, global_limit=25)
-        # Add old timestamps (>60s ago)
         old_time = time.time() - 120
         rl._global_429_timestamps = [old_time] * 4
         rl.report_429(5.0)
-        # Old ones pruned, so only 1 recent → no global pause
         assert rl._global_paused_until == 0
         assert len(rl._global_429_timestamps) == 1
 
     def test_success_on_unknown_chat_is_noop(self, fake_redis):
         rl = RateLimiter(fake_redis, global_limit=25)
-        rl.report_success(999)  # Should not raise
+        rl.report_success(999)
         assert 999 not in rl._chat_errors
 
 
@@ -75,18 +71,21 @@ class TestGlobalTokenBucket:
     @pytest.mark.asyncio
     async def test_acquire_global_token_succeeds(self, fake_redis):
         rl = RateLimiter(fake_redis, global_limit=25)
-        # Pipeline returns [removed_count, current_count] – bucket is empty
-        pipe = fake_redis.pipeline.return_value
-        pipe.execute = pytest.importorskip("unittest.mock").AsyncMock(
-            return_value=[0, 0]
-        )
+        fake_redis.eval = AsyncMock(return_value=1)
+
         await rl._acquire_global_token()
-        # Verify a token was added to the sorted set
-        assert fake_redis.zadd.called
+
+        fake_redis.eval.assert_awaited_once()
+        script, key_count, key, now, limit, token = fake_redis.eval.await_args.args
+        assert script == rl._TOKEN_BUCKET_SCRIPT
+        assert key_count == 1
+        assert key == "rate:global"
+        assert float(now) > 0
+        assert limit == "25"
+        assert token
 
     @pytest.mark.asyncio
     async def test_per_chat_cooldown_first_call_passes(self, fake_redis):
         rl = RateLimiter(fake_redis, global_limit=25)
-        # First call for a chat → no previous send → passes immediately
         await rl._acquire_chat_cooldown(100, 1.0)
         assert fake_redis.set.called

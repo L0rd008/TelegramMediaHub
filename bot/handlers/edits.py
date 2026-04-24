@@ -61,12 +61,28 @@ async def _handle_edit(message: Message) -> None:
     if normalized is None:
         return
 
-    # Check source
+    # Check source and get registered_at for premium check
     async with async_session() as session:
         repo = ChatRepo(session)
-        if not await repo.is_active_source(message.chat.id):
+        source_chat = await repo.get_chat(message.chat.id)
+        if source_chat is None or not source_chat.is_source:
             return
 
+    # H-3: Source-side premium check for cross-chat edit redistribution.
+    # Without this, a free-tier source chat with an expired trial can send
+    # unlimited messages by editing previous ones, bypassing the paywall entirely.
     distributor = get_distributor()
+    try:
+        from bot.services.subscription import is_premium
+        if not await is_premium(distributor._redis, message.chat.id, source_chat.registered_at):
+            logger.debug(
+                "Dropping edit redistribution from non-premium source chat %d",
+                message.chat.id,
+            )
+            return
+    except Exception as e:
+        logger.debug("Premium check failed for edit from chat %d: %s", message.chat.id, e)
+        return
+
     await distributor.distribute(normalized)
     logger.info("Edit redistributed: message %d in chat %d", message.message_id, message.chat.id)

@@ -53,25 +53,40 @@ class RateLimiter:
         cooldown = self._get_cooldown(chat_type)
         await self._acquire_chat_cooldown(chat_id, cooldown)
 
+    # M-2: Lua script for atomic token-bucket check-and-add.
+    # Runs entirely on the Redis server so no two workers can both read
+    # count < limit and insert a token simultaneously (TOCTOU race).
+    _TOKEN_BUCKET_SCRIPT = """
+local key    = KEYS[1]
+local now    = tonumber(ARGV[1])
+local limit  = tonumber(ARGV[2])
+local token  = ARGV[3]
+redis.call('ZREMRANGEBYSCORE', key, 0, now - 1.0)
+local count = redis.call('ZCARD', key)
+if count < limit then
+    redis.call('ZADD', key, now, token)
+    redis.call('EXPIRE', key, 2)
+    return 1
+end
+return 0
+"""
+
     async def _acquire_global_token(self) -> None:
-        """Acquire a token from the global token bucket."""
+        """Acquire a token from the global token bucket (Lua-atomic)."""
         key = "rate:global"
         while True:
             now = time.time()
-            pipe = self._redis.pipeline()
-            # Remove tokens older than 1 second
-            pipe.zremrangebyscore(key, 0, now - 1.0)
-            # Count current tokens
-            pipe.zcard(key)
-            results = await pipe.execute()
-            count = results[1]
-
-            if count < self._global_limit:
-                # Add a new token
-                token_id = str(uuid.uuid4())
-                await self._redis.zadd(key, {token_id: now})
-                await self._redis.expire(key, 2)  # Cleanup TTL
-                return
+            token_id = str(uuid.uuid4())
+            result = await self._redis.eval(
+                self._TOKEN_BUCKET_SCRIPT,
+                1,       # number of KEYS
+                key,     # KEYS[1]
+                str(now),        # ARGV[1]
+                str(self._global_limit),  # ARGV[2]
+                token_id,        # ARGV[3]
+            )
+            if result == 1:
+                return  # Token acquired
 
             # Bucket full – wait for the oldest token to expire
             oldest = await self._redis.zrange(key, 0, 0, withscores=True)

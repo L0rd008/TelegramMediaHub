@@ -10,7 +10,12 @@ from aiogram.types import Message
 from bot.db.engine import async_session
 from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.send_log_repo import SendLogRepo
-from bot.services.dedup import is_duplicate, is_media_group_seen
+from bot.services.dedup import (
+    DEDUP_TTL,
+    compute_fingerprint,
+    is_duplicate,
+    is_media_group_seen,
+)
 from bot.services.distributor import get_distributor
 from bot.services.media_group import get_media_group_buffer
 from bot.services.normalizer import normalize
@@ -81,11 +86,26 @@ async def _handle_content(message: Message) -> None:
     # 4. Media group handling
     if normalized.media_group_id:
         # Mark this media_group_id as seen (24h TTL in Redis).
-        # is_media_group_seen returns False for the first item (marking it),
-        # True for subsequent items in the same group.  All items are buffered
-        # regardless – the marker prevents duplicate processing if the same
-        # media_group_id is replayed (e.g. webhook retry).
         await is_media_group_seen(redis, normalized.media_group_id)
+
+        # H-2: Per-item dedup before buffering.
+        # is_media_group_seen only guards against duplicate group-level processing;
+        # individual items can arrive more than once (e.g. webhook retry).  A
+        # SET NX on the item fingerprint ensures each unique file is buffered
+        # exactly once, preventing duplicate frames in the assembled album.
+        fp = compute_fingerprint(normalized)
+        if fp:
+            already_buffered = not await redis.set(
+                f"dedup:{fp}", "1", ex=DEDUP_TTL, nx=True
+            )
+            if already_buffered:
+                logger.debug(
+                    "Dropping duplicate media group item %d (fingerprint %s)",
+                    message.message_id,
+                    fp,
+                )
+                return
+
         buffer = get_media_group_buffer()
         await buffer.add(normalized)
         return  # Will be flushed as a group later

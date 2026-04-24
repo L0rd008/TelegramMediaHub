@@ -102,7 +102,9 @@ async def cb_settings(callback: CallbackQuery) -> None:
 
     kb = build_settings_panel(chat.allow_self_send, chat.is_source, chat.is_destination)
     try:
-        await callback.message.edit_text("⚙️ <b>Settings</b>", reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text("⚙️ <b>Settings</b>", reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer("⚙️ <b>Settings</b>", reply_markup=kb,
         parse_mode=ParseMode.HTML,
@@ -167,7 +169,9 @@ async def cb_myplan(callback: CallbackQuery) -> None:
             kb = build_subscribe_button()
 
     try:
-        await callback.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(text, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
@@ -189,8 +193,9 @@ async def cb_selfsend(callback: CallbackQuery) -> None:
     kb = build_selfsend_result(enabled)
     try:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"🔄 Echo is now <b>{status}</b>", reply_markup=kb
-        )
+            f"🔄 Echo is now <b>{status}</b>", reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         await callback.message.answer(  # type: ignore[union-attr]
             f"🔄 Echo is now <b>{status}</b>", reply_markup=kb,
@@ -225,7 +230,8 @@ async def cb_broadcast_panel(callback: CallbackQuery) -> None:
                 "Choose exactly what this chat sends and receives. "
                 "Plans start at about <b>1 star per hour</b>.",
                 reply_markup=build_subscribe_button(),
-            )
+                    parse_mode=ParseMode.HTML,
+                )
         except Exception:
             pass
         await callback.answer()
@@ -240,7 +246,8 @@ async def cb_broadcast_panel(callback: CallbackQuery) -> None:
             f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
             f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
             reply_markup=kb,
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer()
@@ -289,7 +296,8 @@ async def cb_broadcast_toggle(callback: CallbackQuery) -> None:
             f"Sending: <b>{out_status}</b> — content from here goes to your other chats\n"
             f"Receiving: <b>{in_status}</b> — content from other chats arrives here",
             reply_markup=kb,
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     label = "Sending" if direction == "o" else "Receiving"
@@ -313,7 +321,8 @@ async def cb_stop_confirm(callback: CallbackQuery) -> None:
             "🛑 <b>Chat unregistered.</b>\n"
             "This chat will no longer send or receive distributed content.\n"
             "Use /start to re-register.",
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer("Chat unregistered.")
@@ -361,7 +370,9 @@ async def cb_admin_status(callback: CallbackQuery) -> None:
 
     kb = build_status_actions(paused, edit_mode, sig_enabled)
     try:
-        await callback.message.edit_text("\n".join(lines), reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text("\n".join(lines), reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
@@ -381,7 +392,9 @@ async def cb_admin_pause(callback: CallbackQuery) -> None:
 
     kb = build_pause_feedback()
     try:
-        await callback.message.edit_text("⏸️ <b>Distribution paused.</b>", reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text("⏸️ <b>Distribution paused.</b>", reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         pass
     await callback.answer("Paused.")
@@ -398,7 +411,9 @@ async def cb_admin_resume(callback: CallbackQuery) -> None:
 
     kb = build_resume_feedback()
     try:
-        await callback.message.edit_text("▶️ <b>Distribution resumed.</b>", reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text("▶️ <b>Distribution resumed.</b>", reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         pass
     await callback.answer("Resumed.")
@@ -420,8 +435,9 @@ async def cb_admin_edits(callback: CallbackQuery) -> None:
     kb = build_edits_panel(mode)
     try:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"📝 <b>Edit redistribution: {mode.upper()}</b>", reply_markup=kb
-        )
+            f"📝 <b>Edit redistribution: {mode.upper()}</b>", reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer(f"Edit mode: {mode}")
@@ -486,7 +502,9 @@ async def cb_chat_list(callback: CallbackQuery) -> None:
 
     kb = build_chat_list_nav(page, total_pages)
     try:
-        await callback.message.edit_text("\n".join(lines), reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text("\n".join(lines), reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
@@ -532,7 +550,9 @@ async def cb_chat_detail(callback: CallbackQuery) -> None:
     )
     kb = build_chat_detail(chat.chat_id)
     try:
-        await callback.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(text, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
@@ -554,7 +574,8 @@ async def cb_remove_prompt(callback: CallbackQuery) -> None:
             f"Remove chat <code>{chat_id}</code>?\n"
             "This will deactivate it from all distribution.",
             reply_markup=kb,
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer()
@@ -573,7 +594,8 @@ async def cb_remove_confirm(callback: CallbackQuery) -> None:
     try:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"✅ Chat <code>{chat_id}</code> removed.",
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer("Removed.")
@@ -594,7 +616,8 @@ async def cb_grant_menu(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"🎁 Grant subscription to <code>{chat_id}</code>:",
             reply_markup=kb,
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer()
@@ -636,7 +659,8 @@ async def cb_grant_exec(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"✅ Granted <b>{plan.label}</b> to chat <code>{chat_id}</code>.\n"
             f"Expires: <b>{expires_str}</b>",
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer("Granted.")
@@ -657,7 +681,8 @@ async def cb_revoke_prompt(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"Revoke subscriptions for <code>{chat_id}</code>?",
             reply_markup=kb,
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer()
@@ -682,7 +707,9 @@ async def cb_revoke_exec(callback: CallbackQuery) -> None:
         text = f"No active subscriptions for <code>{chat_id}</code>."
 
     try:
-        await callback.message.edit_text(text)  # type: ignore[union-attr]
+        await callback.message.edit_text(text,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         pass
     await callback.answer("Done." if revoked else "None found.")
@@ -704,7 +731,8 @@ async def cb_mute_menu(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"🔇 Mute user <code>{user_id}</code>?\nSelect duration:",
             reply_markup=kb,
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer()
@@ -744,7 +772,8 @@ async def cb_mute_exec(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"🔇 User <code>{user_id}</code> muted for <b>{format_duration(td)}</b>.\n"
             f"Expires: <b>{expires.strftime('%d %b %Y %H:%M')} UTC</b>",
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer("Muted.")
@@ -775,7 +804,9 @@ async def cb_unmute(callback: CallbackQuery) -> None:
         text = f"User <code>{user_id}</code> is not muted."
 
     try:
-        await callback.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(text, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         pass
     await callback.answer()
@@ -797,7 +828,8 @@ async def cb_ban_prompt(callback: CallbackQuery) -> None:
             f"⛔ Permanently ban user <code>{user_id}</code>?\n\n"
             "Choose whether to also delete their past messages:",
             reply_markup=kb,
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer()
@@ -834,7 +866,8 @@ async def cb_ban_delete(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"⛔ User <code>{user_id}</code> permanently banned.\n"
             "Their redistributed messages are being deleted.",
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer("Banned.")
@@ -866,7 +899,8 @@ async def cb_ban_only(callback: CallbackQuery) -> None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"⛔ User <code>{user_id}</code> permanently banned.\n"
             "Their past messages were kept.",
-        )
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         pass
     await callback.answer("Banned.")
@@ -915,7 +949,9 @@ async def cb_unban(callback: CallbackQuery) -> None:
         text = f"User <code>{user_id}</code> is not banned."
 
     try:
-        await callback.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(text, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         pass
     await callback.answer()
@@ -995,7 +1031,9 @@ async def cb_help_how(callback: CallbackQuery) -> None:
     admin = _is_admin(callback.from_user.id)
     kb = build_help_back(admin)
     try:
-        await callback.message.edit_text(_HELP_HOW_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(_HELP_HOW_TEXT, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer(_HELP_HOW_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
@@ -1006,7 +1044,9 @@ async def cb_help_prem(callback: CallbackQuery) -> None:
     admin = _is_admin(callback.from_user.id)
     kb = build_help_back(admin)
     try:
-        await callback.message.edit_text(_HELP_PREM_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(_HELP_PREM_TEXT, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer(_HELP_PREM_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
@@ -1020,7 +1060,9 @@ async def cb_help_admin(callback: CallbackQuery) -> None:
 
     kb = build_help_back(is_admin=True)
     try:
-        await callback.message.edit_text(_HELP_ADMIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(_HELP_ADMIN_TEXT, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer(_HELP_ADMIN_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()
@@ -1031,7 +1073,9 @@ async def cb_help_back(callback: CallbackQuery) -> None:
     admin = _is_admin(callback.from_user.id)
     kb = build_help_menu(admin)
     try:
-        await callback.message.edit_text(_HELP_MAIN_TEXT, reply_markup=kb)  # type: ignore[union-attr]
+        await callback.message.edit_text(_HELP_MAIN_TEXT, reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+            )  # type: ignore[union-attr]
     except Exception:
         await callback.message.answer(_HELP_MAIN_TEXT, reply_markup=kb, parse_mode=ParseMode.HTML)  # type: ignore[union-attr]
     await callback.answer()

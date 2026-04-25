@@ -241,6 +241,13 @@ async def cmd_signature(message: Message, command: CommandObject) -> None:
         await repo.set_value("signature_url", "")
         await repo.set_value("signature_enabled", "true")
 
+    # B-2 fix: invalidate the Redis-cached signature so the new value takes
+    # effect on the next message instead of after the 30s TTL expires.
+    try:
+        await get_distributor().invalidate_signature_cache()
+    except RuntimeError:
+        pass  # Distributor not yet initialised (test harness)
+
     await message.answer(f"✅ Signature set: <code>{text}</code>",
         parse_mode=ParseMode.HTML,
     )
@@ -268,6 +275,13 @@ async def cmd_signatureurl(message: Message, command: CommandObject) -> None:
         await repo.set_value("signature_text", "")
         await repo.set_value("signature_enabled", "true")
 
+    # B-2 fix: invalidate the Redis-cached signature so the new value takes
+    # effect on the next message instead of after the 30s TTL expires.
+    try:
+        await get_distributor().invalidate_signature_cache()
+    except RuntimeError:
+        pass
+
     await message.answer(f"✅ Signature URL set: <code>{url}</code>",
         parse_mode=ParseMode.HTML,
     )
@@ -285,6 +299,12 @@ async def cmd_signatureoff(message: Message) -> None:
     async with async_session() as session:
         repo = ConfigRepo(session)
         await repo.set_value("signature_enabled", "false")
+
+    # B-2 fix: invalidate the Redis-cached signature so it actually disables.
+    try:
+        await get_distributor().invalidate_signature_cache()
+    except RuntimeError:
+        pass
 
     await message.answer("✅ Signature disabled.",
         parse_mode=ParseMode.HTML,

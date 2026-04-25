@@ -455,6 +455,14 @@ async def cb_admin_sigoff(callback: CallbackQuery) -> None:
     async with async_session() as session:
         await ConfigRepo(session).set_value("signature_enabled", "false")
 
+    # B-2 fix: invalidate the Redis-cached signature so the change takes effect
+    # immediately rather than after the 30s TTL expires.
+    try:
+        from bot.services.distributor import get_distributor
+        await get_distributor().invalidate_signature_cache()
+    except RuntimeError:
+        pass
+
     await callback.answer("Signature disabled.")
     # Refresh status view
     await cb_admin_status(callback)

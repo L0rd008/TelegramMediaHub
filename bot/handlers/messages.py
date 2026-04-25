@@ -19,6 +19,7 @@ from bot.services.dedup import (
 from bot.services.distributor import get_distributor
 from bot.services.media_group import get_media_group_buffer
 from bot.services.normalizer import normalize
+from bot.services.replies import populate_reply_source
 
 logger = logging.getLogger(__name__)
 
@@ -142,42 +143,12 @@ async def _handle_content(message: Message) -> None:
 
     # ── Step 4 (moved up): Reply detection ───────────────────────────────────
     # Bug 1 fix: reply detection MUST run for ALL message types — including
-    # album items — before the media-group branch returns early.
-    # Previously this block was AFTER the media-group return, so album replies
-    # were never threaded.  We need bot_info here, so fetch it once and reuse.
+    # album items — before the media-group branch returns early. We need
+    # bot_info both here and for dedup below, so fetch it once and reuse.
+    # B-3 / B-7: detection logic now lives in bot.services.replies so the
+    # same code path runs for edited messages too.
     bot_info = await bot.get_me()
-    reply = message.reply_to_message
-    if reply:
-        # Only thread if the replied-to message was bot-sent.
-        # from_user is None for channel posts redistributed by the bot, so we
-        # treat that as a candidate too (passes the "is bot" test implicitly).
-        is_bot_reply = (
-            reply.from_user is None
-            or reply.from_user.id == bot_info.id
-        )
-        if is_bot_reply:
-            try:
-                async with async_session() as session:
-                    sl_repo = SendLogRepo(session)
-                    origin = await sl_repo.reverse_lookup(
-                        message.chat.id, reply.message_id
-                    )
-                if origin:
-                    normalized.reply_source_chat_id = origin[0]
-                    normalized.reply_source_message_id = origin[1]
-                    logger.debug(
-                        "Reply detected: msg %d replies to bot msg %d → source (%d, %d)",
-                        message.message_id,
-                        reply.message_id,
-                        origin[0],
-                        origin[1],
-                    )
-            except Exception as e:
-                logger.debug(
-                    "Reply reverse-lookup failed for msg %d: %s",
-                    reply.message_id,
-                    e,
-                )
+    await populate_reply_source(message, normalized, bot_info)
 
     # 5. Media group handling
     # Reply fields (reply_source_chat_id / reply_source_message_id) are now

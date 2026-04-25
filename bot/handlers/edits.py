@@ -12,6 +12,7 @@ from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.config_repo import ConfigRepo
 from bot.services.distributor import get_distributor
 from bot.services.normalizer import normalize
+from bot.services.replies import populate_reply_source
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,18 @@ async def _handle_edit(message: Message) -> None:
     except Exception as e:
         logger.debug("Premium check failed for edit from chat %d: %s", message.chat.id, e)
         return
+
+    # B-3 fix: reply detection used to run only in messages.py:_handle_content,
+    # so edited replies lost their threading anchor and arrived in every
+    # destination as a top-level message. Run the same helper here so edited
+    # replies preserve their thread.
+    bot = message.bot
+    if bot is not None:
+        try:
+            bot_info = await bot.get_me()
+            await populate_reply_source(message, normalized, bot_info)
+        except Exception as e:
+            logger.debug("Reply detection on edit failed for msg %d: %s", message.message_id, e)
 
     await distributor.distribute(normalized)
     logger.info("Edit redistributed: message %d in chat %d", message.message_id, message.chat.id)

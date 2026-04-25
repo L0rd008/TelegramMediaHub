@@ -286,7 +286,12 @@ def test_send_media_group_fallback_passes_sender_alias():
 
 def test_message_handler_pipeline_order():
     """The message handler must perform checks in the documented order:
-    restriction → normalize → source check → dedup → reply detect → distribute.
+    restriction → normalize → source check → update-retry guard →
+    reply detect (populate_reply_source) → content dedup → distribute.
+
+    Reply detection now lives in :mod:`bot.services.replies`; the handler
+    just calls ``populate_reply_source(...)`` so we look for that token rather
+    than the inline ``reverse_lookup`` of the pre-B-3 implementation.
     """
     import inspect
 
@@ -297,8 +302,9 @@ def test_message_handler_pipeline_order():
         "is_user_restricted",
         "normalize(",
         "is_active_source",
-        "is_duplicate",
-        "reverse_lookup",
+        "is_duplicate_update",
+        "populate_reply_source",
+        "is_duplicate(",
         "distributor.distribute",
     ]
     indices = []

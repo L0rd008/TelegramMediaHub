@@ -11,9 +11,8 @@ from bot.db.engine import async_session
 from bot.db.repositories.chat_repo import ChatRepo
 from bot.db.repositories.send_log_repo import SendLogRepo
 from bot.services.dedup import (
-    DEDUP_TTL,
-    compute_fingerprint,
     is_duplicate,
+    is_duplicate_update,
     is_media_group_seen,
 )
 from bot.services.distributor import get_distributor
@@ -102,7 +101,21 @@ async def on_channel_post(message: Message) -> None:
 
 
 async def _handle_content(message: Message) -> None:
-    """Common handler: restriction check → normalize → source check → dedup → distribute/buffer."""
+    """Common handler: restriction check → normalize → source check → dedup → distribute/buffer.
+
+    Dedup happens in two distinct phases (see :mod:`bot.services.dedup`):
+
+    - *Update-level* dedup (``is_duplicate_update``) runs first.  It keys on
+      ``(chat_id, message_id)`` with a short 60 s TTL and exists purely to
+      swallow Telegram webhook redeliveries.  Cheap, precise, no false positives.
+
+    - *Content-level* dedup (``is_duplicate`` / ``is_album_duplicate``) runs
+      later in the pipeline and is now scoped per source chat, so common text
+      ("ok", "thanks", "good morning") sent in different chats no longer
+      collides.  For albums, content dedup is deferred to flush time so we
+      judge the whole assembled group instead of dropping individual items
+      and producing partial albums.
+    """
     # 0. Ignore bot commands so command routers can handle them.
     if message.text and message.entities:
         first = message.entities[0]
@@ -141,12 +154,25 @@ async def _handle_content(message: Message) -> None:
     distributor = get_distributor()
     redis = distributor._redis  # Use the same Redis instance
 
-    # ── Step 4 (moved up): Reply detection ───────────────────────────────────
-    # Bug 1 fix: reply detection MUST run for ALL message types — including
-    # album items — before the media-group branch returns early. We need
-    # bot_info both here and for dedup below, so fetch it once and reuse.
-    # B-3 / B-7: detection logic now lives in bot.services.replies so the
-    # same code path runs for edited messages too.
+    # ── Step 3a: Webhook-retry guard ──────────────────────────────────────────
+    # Telegram occasionally redelivers the same update after a network blip.
+    # Drop the second delivery silently using a (chat_id, message_id) marker
+    # with a 60s TTL — the only correct way to dedup retries since the content
+    # fingerprint can match across legitimately distinct messages too.
+    if await is_duplicate_update(redis, message.chat.id, message.message_id):
+        logger.debug(
+            "Dropping webhook-retry update (chat=%d, msg=%d)",
+            message.chat.id,
+            message.message_id,
+        )
+        return
+
+    # ── Step 4: Reply detection ──────────────────────────────────────────────
+    # Reply detection MUST run for ALL message types — including album items —
+    # before the media-group branch returns early.  We need bot_info both here
+    # and possibly downstream, so fetch it once and reuse.
+    # B-3 / B-7: detection logic lives in bot.services.replies so the same code
+    # path runs for edited messages too.
     bot_info = await bot.get_me()
     await populate_reply_source(message, normalized, bot_info)
 
@@ -154,35 +180,34 @@ async def _handle_content(message: Message) -> None:
     # Reply fields (reply_source_chat_id / reply_source_message_id) are now
     # populated on `normalized` before buffering, so _flush_group can propagate
     # them to the composite NormalizedMessage.
+    #
+    # NOTE: per-item content dedup *before* buffering used to live here.  It
+    # caused two bugs:
+    #   - Partial-album: if a single item's file_unique_id matched a prior
+    #     send (single OR another album), that item was dropped and the album
+    #     arrived with a hole.
+    #   - Re-uploads with a new media_group_id but same files weren't fully
+    #     dropped — they fell through whenever any item was new.
+    # Whole-album dedup now happens at flush time in MediaGroupBuffer.
     if normalized.media_group_id:
-        # Mark this media_group_id as seen (24h TTL in Redis).
-        await is_media_group_seen(redis, normalized.media_group_id)
-
-        # H-2: Per-item dedup before buffering.
-        # is_media_group_seen only guards against duplicate group-level processing;
-        # individual items can arrive more than once (e.g. webhook retry).  A
-        # SET NX on the item fingerprint ensures each unique file is buffered
-        # exactly once, preventing duplicate frames in the assembled album.
-        fp = compute_fingerprint(normalized)
-        if fp:
-            already_buffered = not await redis.set(
-                f"dedup:{fp}", "1", ex=DEDUP_TTL, nx=True
-            )
-            if already_buffered:
-                logger.debug(
-                    "Dropping duplicate media group item %d (fingerprint %s)",
-                    message.message_id,
-                    fp,
-                )
-                return
+        # Mark seen (informational/observability — return value ignored on the
+        # arrival path; the actual dedup is the update-level guard above plus
+        # the album-level guard at flush).
+        await is_media_group_seen(
+            redis, normalized.source_chat_id, normalized.media_group_id
+        )
 
         buffer = get_media_group_buffer()
         await buffer.add(normalized)
         return  # Will be flushed as a group later
 
-    # 6. Dedup check
+    # 6. Content dedup — per source chat
     if await is_duplicate(redis, normalized):
-        logger.debug("Dropping duplicate message %d", message.message_id)
+        logger.debug(
+            "Dropping duplicate content from chat %d (msg %d)",
+            message.chat.id,
+            message.message_id,
+        )
         return
 
     # 7. Distribute

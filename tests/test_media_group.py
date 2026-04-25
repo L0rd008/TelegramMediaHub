@@ -159,3 +159,43 @@ class TestMediaGroupBufferFlush:
 
         await buffer._flush_group("empty_group")
         assert len(distributed) == 0
+
+    @pytest.mark.asyncio
+    async def test_flush_drops_duplicate_album(self, fake_redis):
+        """Re-uploading the same album (new mg_id, same files) must be dropped at flush."""
+        distributed = []
+
+        class FakeDistributor:
+            async def distribute(self, msg):
+                distributed.append(msg)
+
+        buffer = MediaGroupBuffer(fake_redis, distributor=FakeDistributor())
+
+        # Build the same album payload twice, with different media_group_ids.
+        def _serialize(mg_id: str) -> list[str]:
+            return [
+                json.dumps(MediaGroupBuffer._to_dict(_make_item(
+                    media_group_id=mg_id,
+                    source_message_id=i + 1,
+                    file_id=f"f_{i}",
+                    file_unique_id=f"u_{i}",
+                )))
+                for i in range(3)
+            ]
+
+        # First flush — pristine state, distribute should run.
+        pipe_mock = fake_redis.pipeline.return_value
+        pipe_mock.execute = pytest.importorskip("unittest.mock").AsyncMock(
+            return_value=[_serialize("mg_1"), 1]
+        )
+        await buffer._flush_group("mg_1")
+        assert len(distributed) == 1, "first album must be distributed"
+
+        # Second flush — same files, fresh media_group_id — must be dropped.
+        pipe_mock.execute = pytest.importorskip("unittest.mock").AsyncMock(
+            return_value=[_serialize("mg_2"), 1]
+        )
+        await buffer._flush_group("mg_2")
+        assert len(distributed) == 1, (
+            "duplicate album (same content, new mg_id) must NOT be re-distributed"
+        )

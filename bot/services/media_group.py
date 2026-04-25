@@ -13,6 +13,7 @@ from dataclasses import asdict
 
 import redis.asyncio as aioredis
 
+from bot.services.dedup import is_album_duplicate
 from bot.services.normalizer import NormalizedMessage
 from bot.utils.enums import MessageType
 
@@ -147,6 +148,24 @@ class MediaGroupBuffer:
             items.append(self._from_dict(data))
 
         items.sort(key=lambda m: m.source_message_id)
+
+        # ── Album-level content dedup ───────────────────────────────────────
+        # The previous design did per-item content dedup *before* buffering,
+        # which silently produced partial albums whenever any single item
+        # collided with prior dedup state.  Now we judge the album as a whole
+        # at flush time using a fingerprint over the sorted set of
+        # ``file_unique_id`` values.  Same files (in any order, with any
+        # ``media_group_id``) → same fingerprint → second upload dropped.
+        source_chat_id = items[0].source_chat_id
+        if await is_album_duplicate(self._redis, source_chat_id, items):
+            logger.info(
+                "Dropping duplicate album in chat %d (mg=%s, %d items)",
+                source_chat_id,
+                media_group_id,
+                len(items),
+            )
+            await self._redis.delete(flush_lock_key)
+            return
 
         logger.info(
             "Flushing media group %s with %d items",

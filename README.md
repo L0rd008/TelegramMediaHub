@@ -33,10 +33,12 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Alias lookup** — `/whois <name>` reveals the user behind a pseudonym and shows any active restrictions (spaces and underscores interchangeable)
 
 ### Deduplication
-- Content fingerprinting using `file_unique_id` (media) or SHA-256 (text)
-- 24-hour Redis TTL prevents re-processing identical content
-- Per-item atomic Redis `SET NX` fingerprinting for media group frames prevents duplicate album ingestion on webhook retries
-- Self-message middleware drops the bot's own messages to prevent redistribution loops
+Three independent guards, scoped per source chat so cross-chat content never collides:
+
+- **Update-level guard** — `dup:upd:{chat_id}:{message_id}` with a 60 s TTL. Catches Telegram webhook redeliveries cheaply and without false positives.
+- **Content-level guard (singles)** — `dup:c:{chat_id}:media:{file_unique_id}` or `dup:c:{chat_id}:text:{sha256}` with a 24 h TTL. Stops repost spam *within the same source chat* while letting two distinct chats freely share identical phrases or memes. (The pre-2026-04-25 implementation deduped globally and dropped roughly 95% of legitimate text traffic.)
+- **Album-level guard** — `dup:alb:{chat_id}:{sha256(sorted_file_unique_ids)}` evaluated at flush time, not per item. Re-uploading an album with a fresh `media_group_id` but the same files is detected; mixed/partial re-uploads are not falsely collapsed.
+- Self-message middleware drops the bot's own messages to prevent redistribution loops.
 
 ### Rate Limiting & Resilience
 - **Global token bucket** — 25 messages/second via atomic Redis Lua script (TOCTOU-safe across multiple workers)
@@ -75,7 +77,7 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 ### Infrastructure
 - **Dual-mode** — long-polling (dev) or webhook with aiohttp (prod)
 - **Async PostgreSQL** — via SQLAlchemy 2.0 async + asyncpg, connection pooling (20 + 10 overflow)
-- **Redis** — dedup cache, rate-limit state, media-group buffer, subscription cache, nudge cooldowns, bot username cache (1 h TTL), signature cache (30 s TTL)
+- **Redis** — dedup cache (per-chat, three layers: `dup:upd:*` 60 s, `dup:c:*` 24 h, `dup:alb:*` 24 h), rate-limit state, media-group buffer, subscription cache, nudge cooldowns, bot username cache (1 h TTL), signature cache (30 s TTL)
 - **Alembic migrations** — versioned schema evolution
 - **Docker Compose** — one-command deploy with health-checked Postgres 16 and Redis 7
 - **Send-log cleanup** — background task prunes `send_log` rows older than 48 h (hourly)
@@ -286,9 +288,10 @@ messages_router
   ├─ Restriction check: is_user_restricted? → drop if muted/banned
   ├─ normalize() → NormalizedMessage (or skip unsupported types)
   ├─ is_active_source? → drop if chat not registered
-  ├─ media_group_id? → per-item SET NX dedup, then buffer in Redis (atomic flush after 1s)
-  ├─ is_duplicate? → drop if fingerprint seen in last 24h
+  ├─ is_duplicate_update? → drop redelivered webhook updates (60 s window)
   ├─ Reply detection: is reply to bot message? → reverse lookup in send_log
+  ├─ media_group_id? → buffer in Redis; album-level dedup runs at flush time
+  ├─ is_duplicate? (singles) → drop if same content seen from this chat in last 24 h
   │
   ▼
 distributor.distribute()

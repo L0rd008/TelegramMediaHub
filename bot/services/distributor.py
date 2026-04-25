@@ -257,14 +257,15 @@ class Distributor:
             # Log success
             self._rate_limiter.report_success(task.dest_chat_id)
 
-            # Bug 5 fix: send_media_group now returns list[Message] so we can
-            # log every item, enabling reply threading and ban-cleanup for all
-            # frames in a redistributed album (not just the first).
+            # B-1 fix: send_media_group now returns
+            # list[tuple[Message, NormalizedMessage]] so each sent message is
+            # paired with the specific source item it represents — correct
+            # even when an album mixes types and the compatibility-bucket
+            # split reorders sends relative to the original source order.
+            # The previous shape (zip(result, msg.group_items)) silently
+            # mismapped when buckets reordered (e.g. [photo, doc, photo]).
             if isinstance(result, list):
-                # MEDIA_GROUP path: log each sent message separately.
-                # group_items is ordered by source_message_id (sorted in
-                # MediaGroupBuffer._flush_group), so zip gives correct pairs.
-                for sent_msg, src_item in zip(result, msg.group_items):
+                for sent_msg, src_item in result:
                     if sent_msg and sent_msg.message_id:
                         await self._log_send_item(
                             src_chat_id=src_item.source_chat_id,

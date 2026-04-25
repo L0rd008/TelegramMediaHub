@@ -359,7 +359,7 @@ async def send_media_group(
     allow_paid_broadcast: bool = False,
     source_chat_label: str | None = None,
     source_chat_url: str | None = None,
-) -> list[Message]:
+) -> list[tuple[Message, NormalizedMessage]]:
     """Send a media group (album) to *chat_id*.
 
     Handles type-compatibility splitting per Telegram API:
@@ -367,6 +367,13 @@ async def send_media_group(
     - Audio can only be grouped with other audio
     - Documents can only be grouped with other documents
     - Animations, stickers, video notes → sent individually via send_single
+
+    B-1: Returns ``list[tuple[Message, NormalizedMessage]]`` rather than just
+    ``list[Message]`` so callers can map every sent destination message back
+    to its specific source ``NormalizedMessage``. The previous shape forced
+    distributor._process_task to ``zip`` results with ``msg.group_items`` —
+    correct for homogeneous albums but wrong for mixed-type ones, where
+    compatibility-bucket reordering shifted the pairing.
     """
     if not msg.group_items:
         logger.warning("Media group with no items, skipping")
@@ -383,7 +390,7 @@ async def send_media_group(
             source_chat_label=source_chat_label,
             source_chat_url=source_chat_url,
         )
-        return [result] if result else []
+        return [(result, msg.group_items[0])] if result else []
 
     # Group items by compatible types
     groups = _split_by_compatibility(msg.group_items)
@@ -409,9 +416,13 @@ async def send_media_group(
     else:
         attribution = signature  # plain signature, no label prefix
 
-    all_results: list[Message] = []
+    all_pairs: list[tuple[Message, NormalizedMessage]] = []
     for group in groups:
         input_media = []
+        # B-1: parallel list — input_media[i] is built from media_sources[i].
+        # When bot.send_media_group returns a list of sent Messages we zip
+        # them with this list to recover the source ↔ destination mapping.
+        media_sources: list[NormalizedMessage] = []
         for i, item in enumerate(group):
             if i == 0:
                 # First item of the album: apply attribution (label + signature).
@@ -445,6 +456,7 @@ async def send_media_group(
                             show_caption_above_media=item.show_caption_above_media or None,
                         )
                     )
+                    media_sources.append(item)
                 case MessageType.VIDEO:
                     input_media.append(
                         InputMediaVideo(
@@ -460,6 +472,7 @@ async def send_media_group(
                             show_caption_above_media=item.show_caption_above_media or None,
                         )
                     )
+                    media_sources.append(item)
                 case MessageType.AUDIO:
                     input_media.append(
                         InputMediaAudio(
@@ -472,6 +485,7 @@ async def send_media_group(
                             title=item.title,
                         )
                     )
+                    media_sources.append(item)
                 case MessageType.DOCUMENT:
                     input_media.append(
                         InputMediaDocument(
@@ -481,6 +495,7 @@ async def send_media_group(
                             parse_mode=None,
                         )
                     )
+                    media_sources.append(item)
                 case _:
                     # ANIMATION, STICKER, VIDEO_NOTE etc. are not valid in
                     # sendMediaGroup.  Send individually and collect the result.
@@ -497,7 +512,9 @@ async def send_media_group(
                         source_chat_url=source_chat_url if i == 0 else None,
                     )
                     if fallback_result:
-                        all_results.append(fallback_result)  # Bug 2 fix
+                        # B-1: pair the sent message with the source item it
+                        # actually represents (not the next group_items entry).
+                        all_pairs.append((fallback_result, item))
                     continue
 
         # Build reply_parameters for the media group batch
@@ -514,6 +531,7 @@ async def send_media_group(
             # are sent without a reply anchor to avoid floating orphaned messages.
             for chunk_start in range(0, len(input_media), 10):
                 chunk = input_media[chunk_start : chunk_start + 10]
+                chunk_sources = media_sources[chunk_start : chunk_start + 10]
                 chunk_results = await bot.send_media_group(
                     chat_id=chat_id,
                     media=chunk,
@@ -521,11 +539,20 @@ async def send_media_group(
                     reply_parameters=mg_reply_params,
                 )
                 mg_reply_params = None  # Only first chunk is anchored
-                all_results.extend(chunk_results)
+                # B-1: zip is safe here — chunk_sources[i] is the source for
+                # chunk[i] which is the source for chunk_results[i] (Telegram
+                # preserves order in its sendMediaGroup response).
+                for sent_msg, src_item in zip(chunk_results, chunk_sources):
+                    all_pairs.append((sent_msg, src_item))
         elif len(input_media) == 1:
-            # Single item after compatibility split – send individually
+            # Single item after compatibility split – send individually.
+            # B-1: media_sources[0] is the correct source, even when group[0]
+            # would also be (visual/audio/document buckets are homogeneous so
+            # the indices coincide; using media_sources[0] makes the contract
+            # explicit and survives any future refactor).
+            src_item = media_sources[0]
             single = await send_single(
-                bot, group[0], chat_id, signature,
+                bot, src_item, chat_id, signature,
                 sender_alias=sender_alias,
                 redis=redis,
                 allow_paid_broadcast=allow_paid_broadcast,
@@ -533,9 +560,9 @@ async def send_media_group(
                 source_chat_url=source_chat_url,
             )
             if single:
-                all_results.append(single)
+                all_pairs.append((single, src_item))
 
-    return all_results
+    return all_pairs
 
 
 def _split_by_compatibility(

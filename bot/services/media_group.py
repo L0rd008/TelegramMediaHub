@@ -126,6 +126,17 @@ class MediaGroupBuffer:
         raw_items = results[0]
 
         if not raw_items:
+            # B-6: previously a silent return. If we won the flushing-lock NX
+            # but the buffer is empty, an entire album was lost — typically
+            # because items expired (BUFFER_TTL=2s) before the flusher polled.
+            # Surface a warning so ops can detect tuning regressions; under
+            # normal operation this branch is reached only when a competing
+            # process drained the buffer first, which is benign.
+            logger.warning(
+                "Media group %s: empty buffer after winning flush lock — "
+                "items may have expired or another process flushed first",
+                media_group_id,
+            )
             await self._redis.delete(flush_lock_key)
             return
 

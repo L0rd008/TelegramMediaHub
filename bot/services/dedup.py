@@ -31,16 +31,15 @@ def compute_fingerprint(msg: NormalizedMessage) -> str | None:
 async def is_duplicate(
     redis: aioredis.Redis,
     msg: NormalizedMessage,
-    bot_id: int,
 ) -> bool:
     """Check if a message is a duplicate.
 
     Returns True if the message should be dropped (duplicate or self-sent).
-    """
-    # ── Self-message detection (loop prevention) ──────────────────────
-    # This is checked at the middleware level too, but double-check here
-    # for media groups that bypass the middleware check.
 
+    B-5: previously took an unused ``bot_id`` parameter — self-message
+    detection happens in :class:`SelfMessageMiddleware` and the parameter
+    was never read. Removed to make the call site cleaner.
+    """
     fingerprint = compute_fingerprint(msg)
     if fingerprint is None:
         # Cannot compute fingerprint – allow through

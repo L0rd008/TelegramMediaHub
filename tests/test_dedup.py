@@ -57,22 +57,22 @@ class TestIsDuplicate:
     @pytest.mark.asyncio
     async def test_first_message_is_not_duplicate(self, fake_redis):
         msg = _make_msg(text="unique text")
-        result = await is_duplicate(fake_redis, msg, bot_id=1)
+        result = await is_duplicate(fake_redis, msg)
         assert result is False
 
     @pytest.mark.asyncio
     async def test_same_message_second_time_is_duplicate(self, fake_redis):
         msg = _make_msg(text="duplicate text")
-        await is_duplicate(fake_redis, msg, bot_id=1)
-        result = await is_duplicate(fake_redis, msg, bot_id=1)
+        await is_duplicate(fake_redis, msg)
+        result = await is_duplicate(fake_redis, msg)
         assert result is True
 
     @pytest.mark.asyncio
     async def test_different_messages_not_duplicate(self, fake_redis):
         msg1 = _make_msg(text="first")
         msg2 = _make_msg(text="second")
-        await is_duplicate(fake_redis, msg1, bot_id=1)
-        result = await is_duplicate(fake_redis, msg2, bot_id=1)
+        await is_duplicate(fake_redis, msg1)
+        result = await is_duplicate(fake_redis, msg2)
         assert result is False
 
     @pytest.mark.asyncio
@@ -81,13 +81,13 @@ class TestIsDuplicate:
             message_type=MessageType.PHOTO,
             file_unique_id="photo_uniq_1",
         )
-        assert await is_duplicate(fake_redis, msg, bot_id=1) is False
-        assert await is_duplicate(fake_redis, msg, bot_id=1) is True
+        assert await is_duplicate(fake_redis, msg) is False
+        assert await is_duplicate(fake_redis, msg) is True
 
     @pytest.mark.asyncio
     async def test_no_fingerprint_allows_through(self, fake_redis):
         msg = _make_msg(message_type=MessageType.STICKER)
-        result = await is_duplicate(fake_redis, msg, bot_id=1)
+        result = await is_duplicate(fake_redis, msg)
         assert result is False
 
 

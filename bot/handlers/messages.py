@@ -180,8 +180,8 @@ async def _handle_content(message: Message) -> None:
         await buffer.add(normalized)
         return  # Will be flushed as a group later
 
-    # 6. Dedup check (bot_info already fetched above)
-    if await is_duplicate(redis, normalized, bot_info.id):
+    # 6. Dedup check
+    if await is_duplicate(redis, normalized):
         logger.debug("Dropping duplicate message %d", message.message_id)
         return
 

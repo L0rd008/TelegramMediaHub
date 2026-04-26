@@ -33,10 +33,10 @@ MediaHubDistBot
 > The bot also calls `setMyDescription` on startup with the same copy.
 
 ```
-I'm an intermediary between you and every chat you connect me to.
+I'm an intermediary between you and every chat I'm connected to.
 
-• Private chat with me: I relay everything — text, media, files — to your network and bring everything back.
-• Groups I'm in: all media relayed; text only when it's part of a thread that started with one of my messages. Each group also gets its own readable tag so recipients see which group content came from.
+• Private chat with me: I relay everything — text, media, files — to the whole network and bring everything back.
+• Groups I'm in: all media relayed; text only when it's part of a thread that started with one of my messages.
 • Channels: media-only relay.
 
 Free for the first month. Premium adds Sync Control (pause direction per chat) and removes daily caps.

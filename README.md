@@ -7,10 +7,14 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 ## ✨ Features
 
 ### Content Redistribution
-- **All media types** — text, photo, video, animation/GIF, audio, document, voice, video note, sticker
+- **All media types** — photo, video, animation/GIF, audio, document, voice, video note, sticker; plus text in private chats and bot-rooted reply threads
+- **Per-chat-type relay rules** (2026-04-25):
+  - *Private chat with the bot* → relay everything (text + media), both directions
+  - *Group / supergroup* → relay all media, but text only when it's part of a reply chain rooted in a bot-relayed message (avoids echoing casual member chatter)
+  - *Channel* → media only, no text
 - **Album support** — media groups are buffered in Redis and redistributed as intact albums (photo + video); animations are always sent individually since `sendMediaGroup` does not accept `InputMediaAnimation`
 - **Privacy first** — never uses `forwardMessage` or `copyMessage`; always re-sends via `send*` with `file_id` reuse, so no forwarding metadata appears
-- **Edit redistribution** — optionally re-send edited messages (configurable: `off` or `resend`)
+- **Edit redistribution** — optionally re-send edited messages (configurable: `off` or `resend`); the same group text gate applies, so edits can't be used to bypass the rule
 
 ### Reply Threading
 - **Cross-chat replies** — when a user replies to a bot-sent message in any chat, the reply is distributed to all other chats **as a Telegram Reply** to the corresponding message in each destination
@@ -22,15 +26,20 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Per-chat control** — `/broadcast off out` pauses outgoing content; `/broadcast off in` pauses incoming content
 - **Resume anytime** — `/broadcast on out` and `/broadcast on in` to resume
 - **Premium-gated** — available during the free trial and for premium subscribers; paywalled after trial expiry
+- **Admin-only in groups** — in a group/supergroup, `/broadcast` and `/selfsend` require chat admin or creator status (`getChatMember` lookup); private chats are unrestricted
+- **Defaults on registration** — every newly added chat starts at `broadcast=on, selfsend=off`, regardless of who added the bot
 
 ### Moderation & Aliases
-- **Readable aliases** — each user gets a persistent two-word pseudonym (e.g. `golden_arrow`) that appears as a clickable link to the bot on every redistributed message
+- **User aliases** — every user gets a persistent two-word pseudonym (e.g. `golden_arrow`) that appears as a clickable link to the bot on every redistributed message
+- **Chat aliases (2026-04-26)** — every group / supergroup / channel that the bot relays from also gets its own two-word alias (e.g. `misty_grove`). When a message originates in a group, the visible attribution is `user_alias @ chat_alias` so recipients see *who said it, in which group*. For channel posts and anonymous group admins the chat alias appears parenthesised next to the channel handle/title.
 - **Alias on every message** — text messages, photos, videos, animations, audio, documents, and voice messages all carry the sender's alias; stickers and video notes are excluded (no caption support)
 - **Correct entity offsets** — alias link entities use UTF-16 code unit offsets as required by the Bot API, so emoji and other astral-plane characters before the alias do not shift the link
 - **Mute (admin)** — `/mute <user_id|reply> <duration>` silences a user for a specified time (30m, 2h, 7d, etc.)
 - **Ban (admin)** — `/ban <user_id|reply>` permanently blocks a user with the choice to delete all their past messages or keep them
-- **Reply-based targeting** — admin commands that target a **user** (mute, ban, unmute, unban, whois) resolve `from_user.id`; commands that target a **chat** (remove, grant, revoke) correctly resolve `sender_chat.id` for channels/groups or fall back to `from_user.id` for private chats
-- **Alias lookup** — `/whois <name>` reveals the user behind a pseudonym and shows any active restrictions (spaces and underscores interchangeable)
+- **Banchat (admin)** — `/banchat <chat_id|reply>` blocks every message originating from a specific group / channel at the very top of `_handle_content`. Cached in Redis (`chat_restrict:{chat_id}`, 5 min TTL) so the lookup is one Redis hit per message
+- **Unbanchat (admin)** — `/unbanchat <chat_id|reply>` lifts the chat ban
+- **Reply-based targeting** — admin commands that target a **user** (mute, ban, unmute, unban, whois) resolve `from_user.id`; commands that target a **chat** (remove, grant, revoke, banchat, unbanchat) correctly resolve `sender_chat.id` for channels/groups or fall back to `from_user.id` for private chats
+- **Alias lookup** — `/whois <name>` reveals the user behind a pseudonym; `/chatwhois <name>` reveals the chat. If you accidentally pass a chat alias to `/whois` it tells you to use `/chatwhois` instead (and vice-versa). Spaces and underscores are interchangeable
 
 ### Deduplication
 Three independent guards, scoped per source chat so cross-chat content never collides:

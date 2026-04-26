@@ -122,15 +122,15 @@ def _onboarding_private(bot_at: str) -> str:
     return (
         "👋 <b>You're connected.</b>\n\n"
         "I'm a relay bot — content you send me lands in <i>every other chat</i> "
-        "you've connected to me, and content from those chats lands here. "
+        "I'm connected to, and content from those chats lands here. "
         "Messages arrive as originals, never as forwards.\n\n"
         "<b>What gets relayed</b>\n"
         "• <b>Private chat with me</b> (this chat): everything — text, photos, "
         "videos, audio, files, voice, stickers — both ways.\n"
-        "• <b>Groups you add me to</b>: all media, plus any text that's part "
+        "• <b>Groups I'm in</b>: all media, plus any text that's part "
         "of a reply thread to one of my messages. Casual group chatter is "
-        "ignored so the network doesn't drown in noise.\n"
-        "• <b>Channels you add me to as admin</b>: media only.\n\n"
+        "ignored.\n"
+        "• <b>Channels I'm in as admin</b>: media only.\n\n"
         "<b>Try it — backup recipe</b>\n"
         "1. Make a private group with just yourself (no other members; leave "
         "  <i>“restrict saving content”</i> OFF).\n"
@@ -198,16 +198,15 @@ async def cmd_help(message: Message) -> None:
         "",
         "<b>Relay rules</b>",
         "• <i>Private chat with me</i>: everything you send (text, media, "
-        "  files) goes to your network. Everything from the network arrives here.",
+        "  files) goes to my network. Everything from the network arrives here.",
         "• <i>Groups I'm in</i>: I relay all media. I relay text <b>only</b> "
-        "  when it's part of a reply thread to one of my messages — so I "
-        "  don't echo casual group chatter.",
+        "  when it's part of a reply thread to one of my messages.",
         "• <i>Channels I'm admin in</i>: media-only relay. Plain text posts "
         "  stay in the channel.",
         "",
         "<b>Attribution</b>",
-        "Every message I relay gets a small sign showing the sender's tag. "
-        "When the source is a group, I also append the group's own tag — "
+        "Every message I relay gets a small sign showing the sender's alias tag. "
+        "When the source is a group, I also append the group's own alias tag — "
         "so recipients see <i>who said what, in which group</i>.",
         "",
         "<b>Commands</b>",

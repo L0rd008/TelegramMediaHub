@@ -249,6 +249,7 @@ class TrialReminderTask:
             await asyncio.sleep(REMINDER_INTERVAL)
 
     async def _send_reminders(self) -> None:
+        # Heads-up reminders: T-7, T-3, T-1 days before the trial ends.
         for days_before in REMINDER_DAYS:
             async with async_session() as session:
                 repo = SubscriptionRepo(session)
@@ -269,30 +270,48 @@ class TrialReminderTask:
                 except Exception as e:
                     logger.debug("Failed sending reminder to chat %d: %s", chat.chat_id, e)
 
+        # Day-of-expiry message — sent the first day a chat lands on free
+        # access.  Distinct from T-1 because it names the *current* state and
+        # explains what the user is now experiencing, not predicting.
+        async with async_session() as session:
+            repo = SubscriptionRepo(session)
+            expired = await repo.get_just_expired_trials()
+
+        for chat in expired:
+            try:
+                if chat.chat_id in settings.admin_ids:
+                    continue
+                # ``:0`` namespace so it can never collide with the
+                # ``:1`` / ``:3`` / ``:7`` heads-up dedup keys.
+                dedup_key = f"trial_remind:{chat.chat_id}:0"
+                if await self._redis.set(dedup_key, "1", ex=86_400 * 2, nx=True):
+                    await self._send_single_reminder(chat.chat_id, 0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug(
+                    "Failed sending expiry reminder to chat %d: %s",
+                    chat.chat_id, e,
+                )
+
     async def _send_single_reminder(self, chat_id: int, days_left: int) -> None:
-        if days_left == 1:
-            text = (
-                "<b>Last day of free access.</b>\n\n"
-                "After today, messages from other chats will pause. "
-                "Your own messages keep flowing.\n\n"
-                "Keep everything connected — plans start at about "
-                "<b>1 star per hour</b>."
-            )
+        # Copy lives in :mod:`bot.services.value_prop` so every surface
+        # (onboarding, /plan, /help, reminders, nudges) stays in sync.
+        from bot.services.value_prop import (
+            reminder_t_minus_1,
+            reminder_t_minus_3,
+            reminder_t_minus_7,
+            reminder_t_zero,
+        )
+
+        if days_left == 0:
+            text = reminder_t_zero()
+        elif days_left == 1:
+            text = reminder_t_minus_1()
         elif days_left == 3:
-            text = (
-                "Your free access ends in <b>3 days</b>.\n\n"
-                "After that, you'll still be able to sync your own messages. "
-                "To keep your full network connected, Premium starts at "
-                "<b>250 stars</b>."
-            )
+            text = reminder_t_minus_3()
         else:
-            text = (
-                f"Just a heads up — your free access wraps up in "
-                f"<b>{days_left} days</b>.\n\n"
-                "Everything still works right now. If you'd like to keep "
-                "getting messages from your full network after that, "
-                "the monthly plan is about <b>1 star per hour</b>."
-            )
+            text = reminder_t_minus_7()
         try:
             await self._bot.send_message(
                 chat_id,
@@ -300,6 +319,6 @@ class TrialReminderTask:
                 reply_markup=build_subscribe_button(),
                 parse_mode=ParseMode.HTML,
             )
-            logger.info("Sent %d-day trial reminder to chat %d", days_left, chat_id)
+            logger.info("Sent T-%d trial reminder to chat %d", days_left, chat_id)
         except Exception as e:
             logger.debug("Failed to send trial reminder to %d: %s", chat_id, e)

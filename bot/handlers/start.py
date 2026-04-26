@@ -117,6 +117,8 @@ async def cmd_start(message: Message) -> None:
 
 def _onboarding_private(bot_at: str) -> str:
     """Onboarding for the user's direct chat with the bot."""
+    from bot.services.value_prop import access_blurb_for_onboarding
+
     sel = f"/selfsend{bot_at}"
     bro = f"/broadcast{bot_at}"
     return (
@@ -140,6 +142,7 @@ def _onboarding_private(bot_at: str) -> str:
         "<b>Try it — network recipe</b>\n"
         "Add me to two or more chats and use them as a multi-room conversation. "
         "Photo-share with friends across one group, archive in another.\n\n"
+        f"{access_blurb_for_onboarding()}\n\n"
         f"Useful commands: {bro} (sync direction), /stats (your activity), "
         "/help (full guide). Tap below to explore."
     )
@@ -160,7 +163,10 @@ def _onboarding_group(bot_at: str) -> str:
         "  with one of my messages. Casual group chat stays in the group.\n\n"
         "<b>What I relay into here</b>\n"
         "• Everything that lands on my private chat with my owner (and "
-        "  anything from other connected chats) shows up here automatically.\n\n"
+        "  anything from other connected chats) shows up here automatically — "
+        "  while this chat's free month is active. After that, "
+        "  outbound continues; inbound is a Premium feature. /plan shows "
+        "  the current state any time.\n\n"
         "<b>Admin controls</b> (chat admins only)\n"
         f"• {bro} — pause/resume sending or receiving for this group.\n"
         f"• {sel} — also echo this group's messages back to itself "
@@ -180,13 +186,19 @@ def _onboarding_channel(bot_at: str) -> str:
         "videos, files, audio, animations, voice notes, stickers — into "
         "all the other chats connected to my owner. Plain-text channel "
         "posts are not relayed.\n\n"
-        f"Use {bro} to pause sync for this channel. /stop disconnects it."
+        f"Use {bro} to pause sync for this channel. /stop disconnects it.\n\n"
+        "Channels run on the same plan model as other chats: full "
+        "two-way relay during the first month, then outbound stays open "
+        "and inbound becomes Premium. /plan tells you where this channel "
+        "stands."
     )
 
 
 @start_router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     """Show role-aware help with drill-down buttons."""
+    from bot.services.value_prop import free_vs_premium_block
+
     user_id = message.from_user.id if message.from_user else None
     admin = _is_admin(user_id)
 
@@ -208,6 +220,9 @@ async def cmd_help(message: Message) -> None:
         "Every message I relay gets a small sign showing the sender's alias tag. "
         "When the source is a group, I also append the group's own alias tag — "
         "so recipients see <i>who said what, in which group</i>.",
+        "",
+        "<b>Plans</b>",
+        free_vs_premium_block(),
         "",
         "<b>Commands</b>",
         "/start — Connect this chat / show the guide",

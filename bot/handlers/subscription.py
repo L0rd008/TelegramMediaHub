@@ -100,16 +100,22 @@ async def cmd_plan(message: Message) -> None:
         )
         return
 
-    # Check trial
+    # Check trial — full access during the first month
+    from bot.services.value_prop import free_vs_premium_block
+
     trial_left = get_trial_days_remaining(chat.registered_at)
     if trial_left > 0:
         lines = [
-            "<b>You have full access right now</b>",
+            "<b>You're on full access</b>",
             "",
-            f"<b>{trial_left}</b> days left to explore everything — messages "
-            "from all your connected chats, reply threading, sync control, and more.",
+            f"<b>{trial_left}</b> day{'s' if trial_left != 1 else ''} left "
+            "of your first month. The whole network is in front of you "
+            "right now — every chat I'm connected to, two-way.",
             "",
-            "No payment needed yet.",
+            free_vs_premium_block(),
+            "",
+            "No payment needed yet. /subscribe whenever, or never — "
+            "the choice is yours.",
         ]
         await message.answer(
             "\n".join(lines), reply_markup=build_plan_trial_actions(),
@@ -117,13 +123,15 @@ async def cmd_plan(message: Message) -> None:
         )
         return
 
-    # Expired
+    # Expired — show the exact delta so it's clear what changed and what
+    # comes back when they /subscribe.
     lines = [
-        "<b>Your free access has ended</b>",
+        "<b>You're on free access</b>",
         "",
-        "Messages between your own chats still work. To get messages "
-        "from your whole network again, go Premium — it's about "
-        "<b>1 star per hour</b>.",
+        free_vs_premium_block(),
+        "",
+        "/subscribe brings the inbound side back. Plans start at the "
+        "weekly; the monthly works out to about <b>1 ⭐ / hour</b>.",
     ]
     await message.answer("\n".join(lines), reply_markup=build_subscribe_button(),
         parse_mode=ParseMode.HTML,

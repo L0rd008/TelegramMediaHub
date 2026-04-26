@@ -172,16 +172,19 @@ class Distributor:
         task.add_done_callback(_done_cb)
 
     async def _send_paywall_nudge(self, chat_id: int) -> None:
-        """Send a tasteful upgrade nudge to a chat."""
+        """Send the once-per-day "you missed messages today" nudge.
+
+        Copy lives in :mod:`bot.services.value_prop` (the ``daily_nudge``
+        builder) so the wording stays in sync with the trial reminders and
+        the onboarding text.  Cadence is enforced by the caller via
+        :func:`bot.services.subscription.should_nudge` (24 h Redis cooldown).
+        """
         from bot.services.subscription import build_subscribe_button, get_missed_today
+        from bot.services.value_prop import daily_nudge
 
         try:
             missed = await get_missed_today(self._redis, chat_id)
-            text = (
-                f"<b>{missed}</b> new message{'s' if missed != 1 else ''} "
-                "waiting in your network.\n\n"
-                "Go Premium to see everything — about <b>1 star per hour</b>."
-            )
+            text = daily_nudge(missed)
             await self._bot.send_message(
                 chat_id,
                 text,

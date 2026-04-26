@@ -107,6 +107,47 @@ class SubscriptionRepo:
         )
         return list(result.scalars().all())
 
+    async def get_just_expired_trials(self) -> list[Chat]:
+        """Return chats whose trial ended in the previous 24 h.
+
+        Used by :class:`bot.services.subscription.TrialReminderTask` to send
+        the day-of-expiry message — distinct from the T-7/T-3/T-1 heads-up
+        reminders because it names the *current* state ("you're now on
+        free access") rather than predicting it.
+
+        Bounds: ``target_date - 1d < registered_at + TRIAL_DAYS <= target_date``
+        where ``target_date`` is *today*.  Equivalent to ``days_before == 0``
+        in :meth:`get_expiring_trials`, but kept as a dedicated method so the
+        intent is obvious at the call site and the dedup key in the reminder
+        task is unambiguous.
+        """
+        now = datetime.now(timezone.utc)
+        target_date = now.replace(tzinfo=None)
+        trial_offset = timedelta(days=settings.TRIAL_DAYS)
+
+        lower_bound = target_date - trial_offset - timedelta(days=1)
+        upper_bound = target_date - trial_offset
+
+        has_sub = (
+            select(Subscription.chat_id)
+            .where(
+                Subscription.chat_id == Chat.chat_id,
+                Subscription.expires_at > now,
+            )
+            .correlate(Chat)
+            .exists()
+        )
+
+        result = await self._s.execute(
+            select(Chat).where(
+                Chat.active == True,  # noqa: E712
+                Chat.registered_at > lower_bound,
+                Chat.registered_at <= upper_bound,
+                ~has_sub,
+            )
+        )
+        return list(result.scalars().all())
+
     async def count_premium_chats(self) -> int:
         """Count chats with an active paid subscription (for social proof)."""
         now = datetime.now(timezone.utc)

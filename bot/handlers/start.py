@@ -24,11 +24,29 @@ from bot.services.keyboards import (
     build_stats_actions,
     build_stop_confirm,
 )
+from bot.services.auth import caller_can_manage
 from bot.services.subscription import (
     build_subscribe_button,
     get_trial_days_remaining,
     is_premium,
 )
+
+
+async def _enforce_admin_or_reply(message: Message) -> bool:
+    """For sensitive toggles in groups/channels, require admin status.
+
+    Returns True if the caller is allowed to proceed; False (and answers
+    a friendly denial) otherwise.  Private chats always pass.
+    """
+    if await caller_can_manage(message):
+        return True
+    await message.answer(
+        "Only chat <b>admins</b> can change this for the group. "
+        "Ask an admin to run the command, or use it in your private chat "
+        "with me to change your own settings.",
+        parse_mode=ParseMode.HTML,
+    )
+    return False
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +55,16 @@ start_router = Router(name="start")
 
 @start_router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
-    """Register this chat as source+destination."""
+    """Register this chat as source+destination and show the onboarding guide.
+
+    The guide is tailored to where ``/start`` was run:
+
+    - In a private chat with the bot → personal-network onboarding (selfsend
+      backup recipe, multi-chat fan-out, premium-lite pitch).
+    - In a group / supergroup → group operator onboarding (text vs media
+      relay rules, admin-only toggles, premium notes).
+    - In a channel → channel operator onboarding (media-only relay rule).
+    """
     chat = message.chat
 
     async with async_session() as session:
@@ -49,7 +76,7 @@ async def cmd_start(message: Message) -> None:
             username=chat.username,
         )
 
-    logger.info("Chat registered via /start: %d", chat.id)
+    logger.info("Chat registered via /start: %d (type=%s)", chat.id, chat.type)
 
     # Resolve the user's alias for the welcome message
     alias_line = ""
@@ -59,18 +86,101 @@ async def cmd_start(message: Message) -> None:
             from bot.services.alias import get_alias
             alias = await get_alias(redis, message.from_user.id)
             alias_line = (
-                f"\n\nYour tag is <b>{alias}</b> — it appears on your "
-                "messages across the network."
+                f"\n\n<i>Your tag is</i> <b>{alias}</b> — it appears next to "
+                "your messages on the other side of the network so people "
+                "know who sent what."
             )
 
+    # Bot username for command-mention examples (e.g. /selfsend@MediaHub_Bot)
+    me = await message.bot.get_me() if message.bot else None
+    bot_at = f"@{me.username}" if me and me.username else ""
+
+    if chat.type == "private":
+        body = _onboarding_private(bot_at)
+    elif chat.type in ("group", "supergroup"):
+        body = _onboarding_group(bot_at)
+    elif chat.type == "channel":
+        body = _onboarding_channel(bot_at)
+    else:
+        body = _onboarding_private(bot_at)
+
     await message.answer(
-        "Hey! 👋 <b>This chat is now connected.</b>\n\n"
-        "Anything you send here will show up in your other connected "
-        "chats — and their messages will appear here. Everything looks "
-        "like an original message, never a forward.\n\n"
-        f"You have full access to everything. Explore the options below.{alias_line}",
+        body + alias_line,
         reply_markup=build_main_menu(),
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+# ── Onboarding bodies ──────────────────────────────────────────────────
+
+
+def _onboarding_private(bot_at: str) -> str:
+    """Onboarding for the user's direct chat with the bot."""
+    sel = f"/selfsend{bot_at}"
+    bro = f"/broadcast{bot_at}"
+    return (
+        "👋 <b>You're connected.</b>\n\n"
+        "I'm a relay bot — content you send me lands in <i>every other chat</i> "
+        "you've connected to me, and content from those chats lands here. "
+        "Messages arrive as originals, never as forwards.\n\n"
+        "<b>What gets relayed</b>\n"
+        "• <b>Private chat with me</b> (this chat): everything — text, photos, "
+        "videos, audio, files, voice, stickers — both ways.\n"
+        "• <b>Groups you add me to</b>: all media, plus any text that's part "
+        "of a reply thread to one of my messages. Casual group chatter is "
+        "ignored so the network doesn't drown in noise.\n"
+        "• <b>Channels you add me to as admin</b>: media only.\n\n"
+        "<b>Try it — backup recipe</b>\n"
+        "1. Make a private group with just yourself (no other members; leave "
+        "  <i>“restrict saving content”</i> OFF).\n"
+        "2. Add me to that group; admin role is enough — no extra permissions.\n"
+        f"3. In that group, run {sel} and turn it ON. Now anything you send "
+        "  here also lands there as a backup.\n\n"
+        "<b>Try it — network recipe</b>\n"
+        "Add me to two or more chats and use them as a multi-room conversation. "
+        "Photo-share with friends across one group, archive in another.\n\n"
+        f"Useful commands: {bro} (sync direction), /stats (your activity), "
+        "/help (full guide). Tap below to explore."
+    )
+
+
+def _onboarding_group(bot_at: str) -> str:
+    """Onboarding when /start is run inside a group/supergroup."""
+    sel = f"/selfsend{bot_at}"
+    bro = f"/broadcast{bot_at}"
+    return (
+        "👋 <b>This group is connected.</b>\n\n"
+        "I relay content between this group and all the other chats my owner "
+        "is connected to. Here's how I behave in groups specifically:\n\n"
+        "<b>What I relay from here</b>\n"
+        "• Every photo, video, file, audio, voice note, sticker, animation — "
+        "  always, regardless of who sent it.\n"
+        "• Text <b>only</b> when it's part of a reply thread that started "
+        "  with one of my messages. Casual group chat stays in the group.\n\n"
+        "<b>What I relay into here</b>\n"
+        "• Everything that lands on my private chat with my owner (and "
+        "  anything from other connected chats) shows up here automatically.\n\n"
+        "<b>Admin controls</b> (chat admins only)\n"
+        f"• {bro} — pause/resume sending or receiving for this group.\n"
+        f"• {sel} — also echo this group's messages back to itself "
+        "  (off by default).\n"
+        "• /stop — disconnect this group from the network.\n\n"
+        "Don't enable <i>“restrict saving content”</i> on the group settings — "
+        "Telegram blocks the relay when that's on."
+    )
+
+
+def _onboarding_channel(bot_at: str) -> str:
+    """Onboarding when /start is run inside a channel."""
+    bro = f"/broadcast{bot_at}"
+    return (
+        "📣 <b>This channel is connected.</b>\n\n"
+        "I'll relay every <b>media</b> post from this channel — photos, "
+        "videos, files, audio, animations, voice notes, stickers — into "
+        "all the other chats connected to my owner. Plain-text channel "
+        "posts are not relayed.\n\n"
+        f"Use {bro} to pause sync for this channel. /stop disconnects it."
     )
 
 
@@ -81,25 +191,47 @@ async def cmd_help(message: Message) -> None:
     admin = _is_admin(user_id)
 
     lines = [
-        "📖 <b>Help</b>",
+        "📖 <b>How I work</b>",
         "",
-        "I sync your messages across all your connected Telegram chats "
-        "— they arrive as originals, never as forwards.",
+        "I'm a relay bot. Anything I see in one connected chat I forward to "
+        "every other connected chat — as originals, never forwards.",
+        "",
+        "<b>Relay rules</b>",
+        "• <i>Private chat with me</i>: everything you send (text, media, "
+        "  files) goes to your network. Everything from the network arrives here.",
+        "• <i>Groups I'm in</i>: I relay all media. I relay text <b>only</b> "
+        "  when it's part of a reply thread to one of my messages — so I "
+        "  don't echo casual group chatter.",
+        "• <i>Channels I'm admin in</i>: media-only relay. Plain text posts "
+        "  stay in the channel.",
+        "",
+        "<b>Attribution</b>",
+        "Every message I relay gets a small sign showing the sender's tag. "
+        "When the source is a group, I also append the group's own tag — "
+        "so recipients see <i>who said what, in which group</i>.",
         "",
         "<b>Commands</b>",
-        "/start — Connect this chat",
+        "/start — Connect this chat / show the guide",
         "/stop — Disconnect this chat",
-        "/selfsend — Echo your own messages back",
-        "/broadcast — Control what you send and receive",
-        "/subscribe — Go Premium",
-        "/plan — Check your current plan",
-        "/stats — Your activity and stats",
+        "/selfsend — Echo your own messages back to this chat (off by default)",
+        "/broadcast — Pause/resume sync direction (chat admins only in groups)",
+        "/subscribe — Go Premium · /plan — Check your plan",
+        "/stats — Your activity in the network",
         "/help — This guide",
     ]
+    if admin:
+        lines.extend([
+            "",
+            "<b>Admin moderation</b>",
+            "/whois &lt;name&gt; · /chatwhois &lt;name&gt; — look up by alias",
+            "/mute · /unmute · /ban · /unban — user-level moderation",
+            "/banchat · /unbanchat — chat-level moderation",
+        ])
 
     kb = build_help_menu(admin)
     await message.answer("\n".join(lines), reply_markup=kb,
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
 
 
@@ -120,7 +252,7 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
     """Toggle self-send for this chat."""
     args = (command.args or "").strip().lower()
 
-    # No args → show button panel
+    # No args → show button panel (read-only view, anyone can see)
     if args not in ("on", "off"):
         async with async_session() as session:
             chat = await ChatRepo(session).get_chat(message.chat.id)
@@ -138,6 +270,10 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
             reply_markup=kb,
             parse_mode=ParseMode.HTML,
         )
+        return
+
+    # Mutation path — require admin in groups/channels
+    if not await _enforce_admin_or_reply(message):
         return
 
     enabled = args == "on"
@@ -177,9 +313,14 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
 
         if not await is_premium(redis, message.chat.id, chat_obj.registered_at):
             await message.answer(
-                "<b>Sync Control</b> is a Premium feature.\n\n"
-                "Choose exactly what this chat sends and receives. "
-                "Plans start at about <b>1 star per hour</b>.",
+                "<b>Sync Control</b> — Premium\n\n"
+                "Lets you pause this chat's <i>sending</i> or <i>receiving</i> "
+                "independently. Useful when one chat in your network is going "
+                "through a noisy spell and you want a one-way mute, or when "
+                "you want a chat to be receive-only.\n\n"
+                "Free relay (everything in, everything out) keeps working "
+                "exactly as it does now. Plans start at about "
+                "<b>1 star / hour</b>.",
                 reply_markup=build_subscribe_button(),
         parse_mode=ParseMode.HTML,
     )
@@ -199,6 +340,10 @@ async def cmd_broadcast(message: Message, command: CommandObject) -> None:
 
     action, direction = raw_args[0], raw_args[1]
     enabled = action == "on"
+
+    # Mutation path — require admin in groups/channels (before premium check)
+    if not await _enforce_admin_or_reply(message):
+        return
 
     # Premium gating
     redis = _get_redis()

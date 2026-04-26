@@ -19,6 +19,8 @@ from bot.services.distributor import get_distributor
 from bot.services.media_group import get_media_group_buffer
 from bot.services.normalizer import normalize
 from bot.services.replies import populate_reply_source
+from bot.services.threads import is_in_bot_thread, mark_in_thread
+from bot.utils.enums import MessageType
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,18 @@ async def _handle_content(message: Message) -> None:
         except RuntimeError:
             pass  # Distributor not initialized yet
 
+    # 0b. Check chat-level ban — if the source chat itself is banned, drop
+    # everything from it.  Cheaper than user-by-user moderation when an
+    # entire group has gone off the rails.
+    try:
+        from bot.services.moderation import is_chat_restricted
+        _dist = get_distributor()
+        if await is_chat_restricted(_dist._redis, message.chat.id):
+            logger.debug("Dropping message from restricted chat %d", message.chat.id)
+            return
+    except RuntimeError:
+        pass  # Distributor not initialized yet
+
     # 1. Normalize
     normalized = normalize(message)
     if normalized is None:
@@ -175,6 +189,43 @@ async def _handle_content(message: Message) -> None:
     # path runs for edited messages too.
     bot_info = await bot.get_me()
     await populate_reply_source(message, normalized, bot_info)
+
+    # ── Step 4a: Chat-type / text gate ───────────────────────────────────────
+    # In a group/supergroup the bot must NOT relay generic member chatter —
+    # it should only relay text that participates in a reply chain rooted in a
+    # bot-relayed message (i.e. an actual conversation *with* the network).
+    # In a channel, member-style discussion doesn't exist; per product spec
+    # we relay media but never text.
+    # In a private chat, the user is talking *through* the bot, so everything
+    # text included — relays as before.
+    #
+    # Media (PHOTO/VIDEO/ANIMATION/AUDIO/DOCUMENT/VOICE/VIDEO_NOTE/STICKER and
+    # MEDIA_GROUP) is always relayed regardless of chat type or reply status,
+    # because the bot's primary purpose is media distribution.
+    chat_type = message.chat.type  # "private" | "group" | "supergroup" | "channel"
+    if normalized.message_type == MessageType.TEXT:
+        if chat_type == "channel":
+            logger.debug(
+                "Dropping text in channel %d (channels relay media only)",
+                message.chat.id,
+            )
+            return
+        if chat_type in ("group", "supergroup"):
+            reply = message.reply_to_message
+            in_thread = False
+            if reply is not None:
+                in_thread = await is_in_bot_thread(
+                    redis, message.chat.id, reply.message_id
+                )
+            if not in_thread:
+                logger.debug(
+                    "Dropping group text msg %d in chat %d (not in bot-rooted thread)",
+                    message.message_id, message.chat.id,
+                )
+                return
+            # In-thread → mark this message so future replies to it relay too
+            await mark_in_thread(redis, message.chat.id, message.message_id)
+        # private: fall through, relay as normal
 
     # 5. Media group handling
     # Reply fields (reply_source_chat_id / reply_source_message_id) are now

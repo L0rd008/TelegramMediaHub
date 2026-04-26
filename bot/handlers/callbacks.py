@@ -42,12 +42,39 @@ from bot.services.keyboards import (
     build_unban_undo,
     build_unmute_undo,
 )
+from bot.services.auth import ADMIN_REQUIRED_CHAT_TYPES, ADMIN_STATUSES
 from bot.services.moderation import (
     format_duration,
     invalidate_restriction_cache,
     parse_duration,
 )
 from bot.services.subscription import PLANS, invalidate_cache, is_premium
+
+
+async def _callback_caller_can_manage(callback: CallbackQuery) -> bool:
+    """Mirror of ``services.auth.caller_can_manage`` for inline-button callbacks.
+
+    Inline buttons can be tapped by anyone in a group, so the same admin gate
+    that protects ``/selfsend`` and ``/broadcast`` slash commands must apply
+    here too.  Private chats always pass.
+    """
+    if callback.message is None or callback.message.chat.type not in ADMIN_REQUIRED_CHAT_TYPES:
+        return True
+    user = callback.from_user
+    if user is None or user.id == 1087968824:  # anon admin
+        return True
+    bot = callback.bot
+    if bot is None:
+        return False
+    try:
+        member = await bot.get_chat_member(callback.message.chat.id, user.id)
+        return member.status in ADMIN_STATUSES
+    except Exception as e:
+        logger.debug(
+            "_callback_caller_can_manage failed chat=%d user=%d: %s",
+            callback.message.chat.id, user.id, e,
+        )
+        return False
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +210,9 @@ async def cb_myplan(callback: CallbackQuery) -> None:
 @callbacks_router.callback_query(F.data.in_({"ss:0", "ss:1"}))
 async def cb_selfsend(callback: CallbackQuery) -> None:
     chat_id = callback.message.chat.id if callback.message else 0
+    if not await _callback_caller_can_manage(callback):
+        await callback.answer("Only chat admins can change this.", show_alert=True)
+        return
     enabled = callback.data == "ss:1"
 
     async with async_session() as session:
@@ -226,9 +256,10 @@ async def cb_broadcast_panel(callback: CallbackQuery) -> None:
         from bot.services.subscription import build_subscribe_button
         try:
             await callback.message.edit_text(  # type: ignore[union-attr]
-                "<b>Sync Control</b> is a Premium feature.\n\n"
-                "Choose exactly what this chat sends and receives. "
-                "Plans start at about <b>1 star per hour</b>.",
+                "<b>Sync Control</b> — Premium\n\n"
+                "Lets you pause sending or receiving for this chat "
+                "independently. Free relay keeps working as before. "
+                "Plans start at about <b>1 star / hour</b>.",
                 reply_markup=build_subscribe_button(),
                     parse_mode=ParseMode.HTML,
                 )
@@ -257,6 +288,10 @@ async def cb_broadcast_panel(callback: CallbackQuery) -> None:
 async def cb_broadcast_toggle(callback: CallbackQuery) -> None:
     chat_id = callback.message.chat.id if callback.message else 0
     data = callback.data or ""
+
+    if not await _callback_caller_can_manage(callback):
+        await callback.answer("Only chat admins can change this.", show_alert=True)
+        return
 
     redis = _get_redis()
     if redis is None:

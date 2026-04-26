@@ -138,6 +138,17 @@ async def _on_startup(bot: Bot, redis: aioredis.Redis, dp: Dispatcher) -> None:
     bot_info = dp["bot_info"]
     logger.info("Bot @%s (id=%d) started.", bot_info.username, bot_info.id)
 
+    # Sync the BotFather command list and short/long descriptions with code,
+    # so the in-client menu and the chat-info screen always reflect the
+    # current handler set.  Best-effort — Telegram rate-limits these calls
+    # and returns 400 if no change is needed; we swallow either silently.
+    from bot.services.bot_profile import sync_bot_profile
+
+    try:
+        await sync_bot_profile(bot)
+    except Exception as e:
+        logger.debug("sync_bot_profile failed: %s", e)
+
 
 async def _on_shutdown(dp: Dispatcher) -> None:
     """Graceful shutdown – drain workers, close pools."""

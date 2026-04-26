@@ -220,12 +220,43 @@ async def cmd_help(message: Message) -> None:
         "/help — This guide",
     ]
     if admin:
+        # Admin commands are deliberately NOT pushed to BotFather (they don't
+        # appear in the in-client "/" picker), so this is the only place an
+        # operator can discover their full toolkit.  Keep this list in sync
+        # with docs/botfather-setup.md → "Admin-only commands".
         lines.extend([
             "",
-            "<b>Admin moderation</b>",
-            "/whois &lt;name&gt; · /chatwhois &lt;name&gt; — look up by alias",
-            "/mute · /unmute · /ban · /unban — user-level moderation",
-            "/banchat · /unbanchat — chat-level moderation",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "🛠 <b>Admin commands</b> (you only — invisible to others)",
+            "",
+            "<b>Network ops</b>",
+            "/status — Live dashboard",
+            "/list — All connected chats",
+            "/pause — Stop all syncing across the network",
+            "/resume — Resume syncing",
+            "/edits — Toggle edited-message redistribution",
+            "",
+            "<b>Signature</b>",
+            "/signature &lt;text&gt; — Add a signature line to outgoing messages",
+            "/signatureurl &lt;url&gt; — Make the signature a clickable link",
+            "/signatureoff — Remove the signature",
+            "",
+            "<b>Chat lifecycle</b>",
+            "/remove &lt;chat_id|reply&gt; — Disconnect a chat from the network",
+            "/grant &lt;chat_id&gt; &lt;plan&gt; — Give a chat Premium access",
+            "/revoke &lt;chat_id|reply&gt; — Remove a chat's Premium",
+            "",
+            "<b>User moderation</b>",
+            "/mute &lt;user_id|reply&gt; &lt;duration&gt; — Silence a user for a while",
+            "/unmute &lt;user_id|reply&gt; — Lift a mute",
+            "/ban &lt;user_id|reply&gt; — Permanently block a user",
+            "/unban &lt;user_id|reply&gt; — Unblock a user",
+            "/whois &lt;name&gt; — Look up the user behind an alias",
+            "",
+            "<b>Chat moderation</b>",
+            "/banchat &lt;chat_id|reply&gt; — Block all messages from a source chat",
+            "/unbanchat &lt;chat_id|reply&gt; — Lift a chat-level ban",
+            "/chatwhois &lt;name&gt; — Look up the chat behind an alias",
         ])
 
     kb = build_help_menu(admin)

@@ -98,9 +98,9 @@ unmute - Lift a mute
 ban - Permanently block a user
 unban - Unblock a user
 whois - Look up who's behind a user alias
-banchat - Block all messages from a source chat (added 2026-04-26)
-unbanchat - Lift a chat-level ban (added 2026-04-26)
-chatwhois - Look up which chat is behind an alias (added 2026-04-26)
+banchat - Block all messages from a source chat
+unbanchat - Lift a chat-level ban
+chatwhois - Look up which chat is behind an alias
 ```
 
 ---

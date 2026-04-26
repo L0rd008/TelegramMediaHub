@@ -62,6 +62,10 @@ class NormalizedMessage:
     # label in the redistributed message when no user alias is available.
     source_chat_title: str | None = None
     source_chat_username: str | None = None
+    # 2026-04-26: chat type carried through so the distributor can decide
+    # whether to append a chat alias to the visible sign.  Values mirror
+    # Telegram's: ``"private" | "group" | "supergroup" | "channel"``.
+    source_chat_type: str | None = None
 
     # Reply threading – set by the message handler after send_log reverse lookup
     reply_source_chat_id: int | None = None
@@ -139,6 +143,7 @@ def normalize(message: Message) -> NormalizedMessage | None:
         source_user_id=source_user_id,
         source_chat_title=source_chat_title,
         source_chat_username=source_chat_username,
+        source_chat_type=getattr(message.chat, "type", None),
         media_group_id=message.media_group_id,
         show_caption_above_media=bool(getattr(message, "show_caption_above_media", False)),
     )

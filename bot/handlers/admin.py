@@ -14,7 +14,9 @@ from aiogram.types import Message
 from bot.config import settings
 from bot.db.engine import async_session
 from bot.db.repositories.alias_repo import AliasRepo
+from bot.db.repositories.chat_alias_repo import ChatAliasRepo
 from bot.db.repositories.chat_repo import ChatRepo
+from bot.db.repositories.chat_restriction_repo import ChatRestrictionRepo
 from bot.db.repositories.config_repo import ConfigRepo
 from bot.db.repositories.restriction_repo import RestrictionRepo
 from bot.db.repositories.send_log_repo import SendLogRepo
@@ -34,6 +36,7 @@ from bot.services.keyboards import (
 )
 from bot.services.moderation import (
     format_duration,
+    invalidate_chat_restriction_cache,
     invalidate_restriction_cache,
     parse_duration,
 )
@@ -727,6 +730,18 @@ async def cmd_whois(message: Message, command: CommandObject) -> None:
         user_id = await alias_repo.lookup_by_alias(alias)
 
     if user_id is None:
+        # Maybe the operator passed a *chat* alias by mistake — point them at
+        # /chatwhois instead of dead-ending with "not found".
+        async with async_session() as session:
+            chat_alias_repo = ChatAliasRepo(session)
+            maybe_chat = await chat_alias_repo.lookup_by_alias(alias)
+        if maybe_chat is not None:
+            await message.answer(
+                f"<b>{alias}</b> is a chat alias, not a user. "
+                f"Run <code>/chatwhois {alias}</code> to inspect it.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
         await message.answer(f"No user found for <b>{alias}</b>.",
         parse_mode=ParseMode.HTML,
     )
@@ -756,3 +771,158 @@ async def cmd_whois(message: Message, command: CommandObject) -> None:
     await message.answer("\n".join(lines), reply_markup=kb,
         parse_mode=ParseMode.HTML,
     )
+
+
+# ── Chat-level moderation (2026-04-26) ────────────────────────────────
+
+
+@admin_router.message(Command("banchat"))
+async def cmd_banchat(message: Message, command: CommandObject) -> None:
+    """Ban an entire source chat from relaying.
+
+    Every message arriving from a banned chat is dropped at the very top of
+    ``_handle_content``.  Use for noisy or abusive groups.
+
+    Usage:
+        /banchat <chat_id>      — ban by numeric chat id
+        (reply) /banchat        — ban the chat that sent the replied-to msg
+    """
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    bot_info = await message.bot.get_me()
+    target = await _resolve_target_chat(message, command.args, bot_info.id)
+
+    if target is None:
+        await message.answer(
+            "Usage: /banchat &lt;chat_id&gt; or reply to a message from the chat.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    admin_id = message.from_user.id if message.from_user else 0
+
+    async with async_session() as session:
+        repo = ChatRestrictionRepo(session)
+        await repo.create_restriction(
+            chat_id=target,
+            restriction_type="ban",
+            restricted_by=admin_id,
+            expires_at=None,  # permanent
+        )
+
+    distributor = get_distributor()
+    await invalidate_chat_restriction_cache(distributor._redis, target)
+
+    await message.answer(
+        f"⛔ Chat <code>{target}</code> banned. "
+        "Future messages from this chat will be dropped.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@admin_router.message(Command("unbanchat"))
+async def cmd_unbanchat(message: Message, command: CommandObject) -> None:
+    """Lift a chat ban.
+
+    Usage:
+        /unbanchat <chat_id>
+        (reply) /unbanchat
+    """
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    bot_info = await message.bot.get_me()
+    target = await _resolve_target_chat(message, command.args, bot_info.id)
+
+    if target is None:
+        await message.answer(
+            "Usage: /unbanchat &lt;chat_id&gt; or reply to a message from the chat.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    async with async_session() as session:
+        repo = ChatRestrictionRepo(session)
+        removed = await repo.remove_restriction(target, "ban")
+
+    distributor = get_distributor()
+    await invalidate_chat_restriction_cache(distributor._redis, target)
+
+    if removed:
+        await message.answer(
+            f"✅ Chat <code>{target}</code> unbanned.",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        await message.answer(
+            f"Chat <code>{target}</code> is not banned.",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+@admin_router.message(Command("chatwhois"))
+async def cmd_chatwhois(message: Message, command: CommandObject) -> None:
+    """Look up a chat by its alias.
+
+    Usage: /chatwhois &lt;name&gt;  (e.g. /chatwhois misty_grove)
+
+    Spaces and underscores are interchangeable, mirroring /whois.
+    """
+    if not _is_admin(message.from_user and message.from_user.id):
+        return
+
+    raw = (command.args or "").strip().lower()
+    if not raw:
+        await message.answer(
+            "Usage: /chatwhois &lt;name&gt;  (e.g. /chatwhois misty_grove)\n"
+            "Spaces and underscores are interchangeable.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    alias = raw.strip("[]").replace(" ", "_")
+
+    async with async_session() as session:
+        chat_alias_repo = ChatAliasRepo(session)
+        chat_id = await chat_alias_repo.lookup_by_alias(alias)
+
+    if chat_id is None:
+        await message.answer(
+            f"No chat found for <b>{alias}</b>. "
+            "If you're looking up a person, try /whois.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    async with async_session() as session:
+        chat_repo = ChatRepo(session)
+        chat = await chat_repo.get_chat(chat_id)
+        cr_repo = ChatRestrictionRepo(session)
+        restriction = await cr_repo.get_active_restriction(chat_id)
+
+    chat_name = "unknown"
+    chat_type = "unknown"
+    if chat is not None:
+        chat_name = chat.title or (f"@{chat.username}" if chat.username else str(chat_id))
+        chat_type = chat.chat_type
+
+    if restriction is None:
+        status = "None"
+    else:
+        rtype = restriction.restriction_type.capitalize()
+        if restriction.expires_at:
+            exp = restriction.expires_at.strftime("%d %b %Y %H:%M UTC")
+            status = f"{rtype} (until {exp})"
+        else:
+            status = f"{rtype} (permanent)"
+
+    lines = [
+        f"🔍 <b>Chat Lookup: {alias}</b>",
+        "",
+        f"Chat ID: <code>{chat_id}</code>",
+        f"Type: {chat_type}",
+        f"Name: {chat_name}",
+        f"Restriction: {status}",
+    ]
+    await message.answer("\n".join(lines), parse_mode=ParseMode.HTML)

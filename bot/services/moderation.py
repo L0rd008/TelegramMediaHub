@@ -14,6 +14,7 @@ from bot.db.repositories.restriction_repo import RestrictionRepo
 logger = logging.getLogger(__name__)
 
 RESTRICT_CACHE_TTL = 300  # 5 minutes
+CHAT_RESTRICT_CACHE_TTL = 300  # 5 minutes (mirrors user-restriction cache)
 
 # Pattern for duration strings like "30m", "2h", "7d", "1d12h", "24h30m".
 # L-2: The positive lookahead (?=\d) ensures at least one component is present;
@@ -57,6 +58,48 @@ async def invalidate_restriction_cache(
 ) -> None:
     """Delete the restriction cache key after a moderation action."""
     await redis_client.delete(f"restrict:{user_id}")
+
+
+# ── Chat-level (group) restrictions ──────────────────────────────────
+
+
+async def is_chat_restricted(
+    redis_client: aioredis.Redis, chat_id: int
+) -> str | None:
+    """Return ``"banned"`` if the chat has an active ban, else ``None``.
+
+    Mirrors :func:`is_user_restricted` but keys on ``chat_id``.  Mute is
+    reserved as a future restriction type but currently unused for chats.
+    """
+    cache_key = f"chat_restrict:{chat_id}"
+    cached = await redis_client.get(cache_key)
+    if cached is not None:
+        val = cached if isinstance(cached, str) else cached.decode()
+        return val if val != "none" else None
+
+    # Lazy import keeps the moderation module independent of the chat
+    # repositories at import time (which matters for test fixtures).
+    from bot.db.engine import async_session
+    from bot.db.repositories.chat_restriction_repo import ChatRestrictionRepo
+
+    async with async_session() as session:
+        repo = ChatRestrictionRepo(session)
+        restriction = await repo.get_active_restriction(chat_id)
+
+    if restriction is not None:
+        label = "banned" if restriction.restriction_type == "ban" else restriction.restriction_type
+        await redis_client.set(cache_key, label, ex=CHAT_RESTRICT_CACHE_TTL)
+        return label
+
+    await redis_client.set(cache_key, "none", ex=CHAT_RESTRICT_CACHE_TTL)
+    return None
+
+
+async def invalidate_chat_restriction_cache(
+    redis_client: aioredis.Redis, chat_id: int
+) -> None:
+    """Delete the chat-restriction cache after a moderation action."""
+    await redis_client.delete(f"chat_restrict:{chat_id}")
 
 
 def parse_duration(text: str) -> timedelta | None:

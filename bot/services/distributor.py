@@ -232,16 +232,57 @@ class Distributor:
                     sender_alias = await get_alias(self._redis, msg.source_user_id)
                 except Exception as e:
                     logger.debug("Failed to resolve alias for user %d: %s", msg.source_user_id, e)
+
+                # 2026-04-26: when the user posted from a group/supergroup,
+                # the visible attribution is ``user_alias @ chat_alias`` so
+                # recipients see *both* who said it and where.  Channels and
+                # private chats are handled below (different code paths).
+                if sender_alias and msg.source_chat_type in ("group", "supergroup"):
+                    try:
+                        from bot.services.chat_alias import (
+                            format_group_attribution,
+                            get_chat_alias,
+                        )
+                        chat_alias = await get_chat_alias(
+                            self._redis, msg.source_chat_id
+                        )
+                        sender_alias = format_group_attribution(
+                            sender_alias, chat_alias
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            "Failed to resolve chat alias for chat %d: %s",
+                            msg.source_chat_id, e,
+                        )
             else:
-                # Channel post or anonymous admin → show source chat identity
-                # (Bug 3 fix: source_chat_username / source_chat_title are populated
-                # by the normalizer when from_user is None or is GroupAnonymousBot)
+                # Channel post or anonymous admin → show source chat identity.
+                # source_chat_username / source_chat_title are populated by
+                # the normalizer when from_user is None or is GroupAnonymousBot.
                 if msg.source_chat_username:
                     source_chat_label = f"@{msg.source_chat_username}"
                     source_chat_url = f"https://t.me/{msg.source_chat_username}"
                 elif msg.source_chat_title:
                     source_chat_label = msg.source_chat_title
                     source_chat_url = None
+
+                # Channels and anon-admin groups also get a stable chat alias
+                # appended.  Helps recipients tell two channels with similar
+                # titles apart, and gives anon admins a persistent identity
+                # without revealing who they are.
+                try:
+                    from bot.services.chat_alias import get_chat_alias
+                    chat_alias = await get_chat_alias(
+                        self._redis, msg.source_chat_id
+                    )
+                    if source_chat_label:
+                        source_chat_label = f"{source_chat_label} ({chat_alias})"
+                    else:
+                        source_chat_label = chat_alias
+                except Exception as e:
+                    logger.debug(
+                        "Failed to resolve chat alias for chat %d: %s",
+                        msg.source_chat_id, e,
+                    )
 
             # Send — pass redis for C-1 (bot username cache) and H-1 (paid broadcast)
             result = await send_single(

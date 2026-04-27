@@ -1,4 +1,15 @@
 services:
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      PYTHONPATH: /app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   bot:
     build: .
     env_file: .env
@@ -9,6 +20,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   postgres:

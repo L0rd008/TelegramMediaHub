@@ -95,7 +95,11 @@ async def _on_startup(bot: Bot, redis: aioredis.Redis, dp: Dispatcher) -> None:
     #    silently no-op and the bot crashes on the first request that
     #    touches a new column.  Set DISABLE_AUTO_MIGRATE=1 to opt out
     #    (e.g. when migrations run from a separate CI job).
-    await upgrade_to_head(engine)
+    #
+    #    We don't pass the engine — alembic's env.py builds its own from
+    #    settings.DATABASE_URL.  See bot/db/migrate.py for the threading
+    #    rationale.
+    await upgrade_to_head()
 
     # 2. Belt-and-braces: catch tables that exist in the model but never had
     #    an alembic revision (e.g. dev databases stamped before a migration

@@ -31,13 +31,13 @@ config file must ship with the image.  Both are trivially worth it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from bot.config import settings
 
@@ -78,21 +78,36 @@ def _alembic_config() -> Config:
     return cfg
 
 
-def _do_upgrade_head(_conn) -> None:
-    """Synchronous callback handed to ``connection.run_sync``.
+def _run_upgrade_blocking() -> None:
+    """Synchronous alembic upgrade — built to be handed to ``asyncio.to_thread``.
 
-    Alembic's ``command.upgrade`` is sync — we run it inside a sync wrapper
-    so it cooperates with the async engine's connection pool.
+    The existing ``alembic/env.py`` is the standard alembic-async template
+    that calls ``asyncio.run(run_async_migrations())``.  ``asyncio.run`` cannot
+    be invoked from inside a running event loop, so dispatching the alembic
+    command from a worker thread (which has no loop of its own until
+    ``asyncio.run`` creates one) is the cleanest way to keep the alembic
+    config untouched while still self-applying migrations on bot startup.
+
+    Lives at module scope (not nested inside ``upgrade_to_head``) so it's
+    picklable / introspectable — small thing, but pays off if we ever move
+    to a process pool.
     """
     cfg = _alembic_config()
     command.upgrade(cfg, "head")
 
 
-async def upgrade_to_head(engine: AsyncEngine) -> None:
+async def upgrade_to_head() -> None:
     """Bring the connected DB up to ``head``.  Logs progress and re-raises
     on failure so the bot doesn't keep running against a broken schema.
 
     Idempotent — running it on an already-current DB is a no-op.
+
+    Implementation: alembic's standard async ``env.py`` template uses
+    ``asyncio.run`` internally, which conflicts with the bot's running event
+    loop.  We sidestep that by running the alembic command on a worker thread
+    (``asyncio.to_thread``); inside the thread, alembic creates its own loop
+    cleanly.  We don't need an ``AsyncEngine`` here at all — alembic's env.py
+    builds its own connection from ``settings.DATABASE_URL``.
 
     Operators can disable this by setting ``DISABLE_AUTO_MIGRATE=1`` in the
     environment, e.g. when running migrations from a separate CI job and
@@ -106,8 +121,7 @@ async def upgrade_to_head(engine: AsyncEngine) -> None:
 
     logger.info("Running alembic upgrade head…")
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(_do_upgrade_head)
+        await asyncio.to_thread(_run_upgrade_blocking)
         logger.info("Schema is at head.")
     except Exception:
         logger.exception(

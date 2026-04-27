@@ -126,6 +126,7 @@ async def send_single(
     signature: str | None,
     reply_to_message_id: int | None = None,
     sender_alias: str | None = None,
+    sender_alias_url: str | None = None,
     redis: aioredis.Redis | None = None,
     allow_paid_broadcast: bool = False,
     source_chat_label: str | None = None,
@@ -134,13 +135,21 @@ async def send_single(
     """Send a single NormalizedMessage to *chat_id*. Returns the sent Message.
 
     Attribution label priority:
-      1. sender_alias  – user pseudonym (e.g. "golden_arrow") → links to bot
-      2. source_chat_label – channel/anon-admin chat name    → links to chat URL
+      1. sender_alias  – user pseudonym (e.g. "golden_arrow")
+      2. source_chat_label – channel/anon-admin chat name
       3. Nothing (sticker, video note, or no registration)
+
+    Attribution URL behaviour:
+
+    - If the caller passes ``sender_alias_url`` it overrides the default —
+      this is how the Premium real-name feature (alembic 010) injects a
+      ``t.me/<username>`` link to the actual sender's profile when the
+      source chat has ``real_links_enabled`` turned on.
+    - Otherwise the default is the bot's own ``t.me/<bot_username>`` page,
+      preserving the long-standing alias-to-bot pseudonymity contract.
 
     UI 1+2: attribution is combined with the signature onto a single line:
       "↗ golden_arrow · — via @MediaHubDistBot"
-    This replaces the previous two-paragraph format.
     """
 
     # ── Determine attribution label and URL ──────────────────────────────────
@@ -151,10 +160,15 @@ async def send_single(
 
     if sender_alias:
         attr_label = sender_alias
-        if redis:
+        if sender_alias_url:
+            # Premium real-name attribution: caller already resolved the
+            # link to the user's actual profile.
+            attr_url = sender_alias_url
+        elif redis:
             bot_uname = await _get_bot_username(bot, redis)
             attr_url = f"https://t.me/{bot_uname}" if bot_uname else ""
-        # attr_url stays "" when redis unavailable; alias still shown as plain text
+        # attr_url stays "" when redis unavailable AND no override; alias
+        # still shown as plain text in that degraded case.
     elif source_chat_label:
         attr_label = source_chat_label
         attr_url = source_chat_url or ""
@@ -328,6 +342,7 @@ async def send_single(
                     bot, msg, chat_id, signature,
                     reply_to_message_id=reply_to_message_id,
                     sender_alias=sender_alias,
+                    sender_alias_url=sender_alias_url,
                     redis=redis,
                     allow_paid_broadcast=allow_paid_broadcast,
                     source_chat_label=source_chat_label,
@@ -355,6 +370,7 @@ async def send_media_group(
     signature: str | None,
     reply_to_message_id: int | None = None,
     sender_alias: str | None = None,
+    sender_alias_url: str | None = None,
     redis: aioredis.Redis | None = None,
     allow_paid_broadcast: bool = False,
     source_chat_label: str | None = None,
@@ -385,6 +401,7 @@ async def send_media_group(
             bot, msg.group_items[0], chat_id, signature,
             reply_to_message_id=reply_to_message_id,
             sender_alias=sender_alias,
+            sender_alias_url=sender_alias_url,
             redis=redis,
             allow_paid_broadcast=allow_paid_broadcast,
             source_chat_label=source_chat_label,
@@ -397,11 +414,15 @@ async def send_media_group(
 
     # ── Attribution setup (mirrors send_single logic) ─────────────────────────
     # Bug 3 fix: use source_chat_label when sender_alias is absent.
+    # 2026-04-26: ``sender_alias_url`` overrides the default bot-link when the
+    # source chat opted into Premium real-name attribution (alembic 010).
     attr_label = ""
     attr_url = ""
     if sender_alias:
         attr_label = sender_alias
-        if redis:
+        if sender_alias_url:
+            attr_url = sender_alias_url
+        elif redis:
             bot_uname = await _get_bot_username(bot, redis)
             attr_url = f"https://t.me/{bot_uname}" if bot_uname else ""
     elif source_chat_label:

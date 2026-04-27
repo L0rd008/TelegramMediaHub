@@ -71,6 +71,8 @@ FREE_INCLUDES = (
 PREMIUM_ADDS = (
     "Receive — messages other people post in their chats land in yours",
     "Sync Control — pause sending or receiving direction independently",
+    "Real-name attribution — alias tags link to your actual profile / group "
+    "(off by default; toggle with /identity)",
 )
 
 

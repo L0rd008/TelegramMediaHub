@@ -39,7 +39,7 @@ I'm an intermediary between you and every chat I'm connected to.
 • Groups I'm in: all media relayed; text only when it's part of a thread that started with one of my messages.
 • Channels: media-only relay.
 
-Free for the first month. Premium adds Sync Control (pause direction per chat) and removes daily caps.
+Free for the first month. Premium adds Sync Control (pause direction per chat) and Real-name attribution (alias tags link to your actual profile / group).
 ```
 
 *Characters: ~492 / 512*
@@ -71,6 +71,7 @@ start - Connect this chat / show the guide
 help - What I can do and how to use me
 selfsend - Echo your messages back to this chat
 broadcast - Pause / resume sync for this chat
+identity - Real-name attribution (Premium)
 stats - Your activity in the network
 subscribe - Go Premium — see the plans
 plan - Check your current plan
@@ -130,8 +131,9 @@ These are the rules the bot enforces (so the BotFather copy and the runtime beha
 - **Group / supergroup** → all media (photo, video, animation, audio, document, voice, video note, sticker, albums) is always relayed. Plain text is relayed *only* if it belongs to a reply chain rooted in a bot-relayed message — casual member chatter is dropped silently to keep the network from drowning in noise.
 - **Channel** → media only. Plain-text channel posts are not relayed.
 - **Each group / channel** also gets its own two-word alias (e.g. `misty_grove`). Outbound messages show `user_alias @ chat_alias` for group sources, so recipients see *who said what, in which group*.
-- **`/selfsend` and `/broadcast`** are read-only for everyone, but in groups / channels the *mutation* path requires Telegram chat-admin status. Private chats are always allowed to mutate.
-- **Defaults on first contact:** `broadcast=on, selfsend=off`. Adding the bot to a new group never inherits the adder's personal toggle state.
+- **`/selfsend`, `/broadcast`, and `/identity`** are read-only for everyone, but in groups / channels the *mutation* path requires Telegram chat-admin status. Private chats are always allowed to mutate.
+- **Defaults on first contact:** `broadcast=on, selfsend=off, real_links=off`. Adding the bot to a new group never inherits the adder's personal toggle state.
+- **`/identity on`** (Premium) — flips alias tags from "link to bot" to "link to your actual profile / group". `/identity off` always works and reverts to the alias-to-bot default. A chat dropping out of Premium silently reverts even without a manual flip — re-checked at every send.
 - **`/banchat <chat_id|reply>`** — admin-only. Drops every future message from the named source chat at the very top of the pipeline. Useful for runaway groups.
 
 ---

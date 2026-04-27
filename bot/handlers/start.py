@@ -229,6 +229,7 @@ async def cmd_help(message: Message) -> None:
         "/stop — Disconnect this chat",
         "/selfsend — Echo your own messages back to this chat (off by default)",
         "/broadcast — Pause/resume sync direction (chat admins only in groups)",
+        "/identity — Real-name attribution toggle (Premium; off by default)",
         "/subscribe — Go Premium · /plan — Check your plan",
         "/stats — Your activity in the network",
         "/help — This guide",
@@ -332,6 +333,109 @@ async def cmd_selfsend(message: Message, command: CommandObject) -> None:
     await message.answer(f"🔄 Echo is now <b>{status}</b>", reply_markup=kb,
         parse_mode=ParseMode.HTML,
     )
+
+
+# ── /identity ─────────────────────────────────────────────────────────
+# Premium-gated, admin-only in groups.  Controls whether the alias-tag entity
+# attached to outbound messages targets the actual user / group profile (when
+# ON) or stays as the long-standing alias-to-bot link (when OFF, the default).
+# Off-by-default is load-bearing — the alias system was added precisely to
+# give pseudonymity by default; this command lets a user opt their own chat
+# (or a group admin opt the whole group) into showing real identity.
+
+_IDENTITY_BLURB = (
+    "<b>Identity in your sign</b>\n\n"
+    "Every message I relay from this chat carries a small attribution tag — "
+    "your user alias (e.g. <i>golden_arrow</i>), and if it's from a group, "
+    "the group's alias too.\n\n"
+    "By default those tags are clickable links back to me, the bot. So a "
+    "recipient sees who said it, but pseudonymously.\n\n"
+    "<b>Real-name attribution</b> (Premium) flips that: the tag links straight "
+    "to your actual profile (or the group, if a public username is set). "
+    "Useful when you want recipients to be able to reach you back, or when "
+    "you're operating as an open identity rather than a pseudonym.\n\n"
+    "Off by default. Off when Premium ends. Toggle anytime with "
+    "<code>/identity on</code> / <code>/identity off</code>."
+)
+
+
+@start_router.message(Command("identity"))
+async def cmd_identity(message: Message, command: CommandObject) -> None:
+    """Toggle Premium real-name attribution for this chat.
+
+    No args → status + benefit explanation (everyone can see).
+    ``on`` / ``off`` → mutate (admin-only in groups, premium-gated for ``on``).
+    """
+    args = (command.args or "").strip().lower()
+
+    # Status view — readable by anyone, no gating
+    async with async_session() as session:
+        chat = await ChatRepo(session).get_chat(message.chat.id)
+    if chat is None:
+        await message.answer(
+            "Please /start first to register this chat.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if args not in ("on", "off"):
+        status = "ON ✅" if chat.real_links_enabled else "OFF"
+        await message.answer(
+            f"{_IDENTITY_BLURB}\n\nCurrently: <b>{status}</b>",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        return
+
+    # Mutation path
+    if not await _enforce_admin_or_reply(message):
+        return
+
+    enabled = args == "on"
+
+    # Premium gate applies only when turning ON.  Turning OFF is always
+    # allowed — we don't trap users into a paid feature they wanted to leave.
+    if enabled:
+        redis = _get_redis()
+        if redis is None:
+            await message.answer(
+                "Service temporarily unavailable.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        if not await is_premium(redis, message.chat.id, chat.registered_at):
+            await message.answer(
+                "<b>Real-name attribution</b> is a Premium feature.\n\n"
+                "Until then, your alias tag links back to me — recipients "
+                "still know who you are within the network, just not "
+                "outside it. Plans start at the weekly; the monthly is "
+                "about <b>1 ⭐ / hour</b>.",
+                reply_markup=build_subscribe_button(),
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+    async with async_session() as session:
+        repo = ChatRepo(session)
+        await repo.toggle_real_links(message.chat.id, enabled)
+
+    status = "ON ✅" if enabled else "OFF"
+    if enabled:
+        body = (
+            f"<b>Real-name attribution is now {status}</b>\n\n"
+            "From here on, the alias tag on messages I relay from this chat "
+            "links to your actual profile (and to the group, if it has a "
+            "public username). Run <code>/identity off</code> to switch back "
+            "to alias-to-bot links."
+        )
+    else:
+        body = (
+            f"<b>Real-name attribution is now {status}</b>\n\n"
+            "Alias tags on messages I relay from this chat link back to me — "
+            "the long-standing default. Your network identity stays "
+            "pseudonymous outside this chat."
+        )
+    await message.answer(body, parse_mode=ParseMode.HTML)
 
 
 @start_router.message(Command("broadcast"))

@@ -32,6 +32,7 @@ PUBLIC_COMMANDS: list[BotCommand] = [
     BotCommand(command="help",      description="What I can do and how to use me"),
     BotCommand(command="selfsend",  description="Echo your messages back to this chat"),
     BotCommand(command="broadcast", description="Pause / resume sync for this chat"),
+    BotCommand(command="identity",  description="Real-name attribution (Premium)"),
     BotCommand(command="stats",     description="Your activity in the network"),
     BotCommand(command="subscribe", description="Go Premium — see the plans"),
     BotCommand(command="plan",      description="Check your current plan"),
@@ -50,15 +51,16 @@ SHORT_DESCRIPTION = (
 # Long description: appears on the bot's profile / before-you-start screen.
 # Max 512 chars enforced by Telegram.
 LONG_DESCRIPTION = (
-    "I'm an intermediary between you and every chat you connect me to.\n\n"
-    "• Private chat with me: I relay everything — text, media, files — to "
-    "your network and bring everything back.\n"
+    "I'm an intermediary between you and every chat I'm connected to.\n\n"
+    "• Private chat with me: I relay everything — text, media, files — to the "
+    "whole network and bring everything back.\n"
     "• Groups I'm in: all media relayed; text only when it's part of a "
-    "thread that started with one of my messages. Each group also gets "
-    "its own readable tag so recipients see which group content came from.\n"
+    "thread that started with one of my messages. Each group gets its own "
+    "readable tag so recipients see where content came from.\n"
     "• Channels: media-only relay.\n\n"
     "Free for the first month. Premium adds Sync Control (pause direction "
-    "per chat) and removes daily caps."
+    "per chat) and Real-name attribution (alias tags link to your actual "
+    "profile / group)."
 )
 
 

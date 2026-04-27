@@ -225,8 +225,18 @@ class Distributor:
 
             # Look up sender alias (user pseudonym) OR derive chat attribution label
             sender_alias: str | None = None
+            sender_alias_url: str | None = None  # Premium real-name override
             source_chat_label: str | None = None
             source_chat_url: str | None = None
+
+            # 2026-04-26: Premium real-name attribution.  Resolve once per
+            # task so we can branch on it cheaply below.  ``real_links_active``
+            # is True only when:
+            #   - the source chat has ``real_links_enabled`` flipped on, AND
+            #   - the source chat is currently Premium (paid or in trial).
+            # Both conditions are required so a chat dropping out of Premium
+            # silently reverts to alias-to-bot links — no policy surprise.
+            real_links_active = await self._is_real_links_active(msg.source_chat_id)
 
             if msg.source_user_id:
                 # Regular user message → resolve pseudonym alias
@@ -235,6 +245,14 @@ class Distributor:
                     sender_alias = await get_alias(self._redis, msg.source_user_id)
                 except Exception as e:
                     logger.debug("Failed to resolve alias for user %d: %s", msg.source_user_id, e)
+
+                # When real-links is active and the sender has a public
+                # username, point the alias entity at their actual profile.
+                # If they have NO public username we leave the URL unset and
+                # send_single falls back to the bot link — that's the edge
+                # case the spec called out (private accounts stay private).
+                if real_links_active and msg.source_user_username:
+                    sender_alias_url = f"https://t.me/{msg.source_user_username}"
 
                 # 2026-04-26: when the user posted from a group/supergroup,
                 # the visible attribution is ``user_alias @ chat_alias`` so
@@ -263,6 +281,10 @@ class Distributor:
                 # the normalizer when from_user is None or is GroupAnonymousBot.
                 if msg.source_chat_username:
                     source_chat_label = f"@{msg.source_chat_username}"
+                    # When real-links is active, link straight to the public
+                    # group/channel.  When it's NOT active, we still keep the
+                    # URL — the channel handle is already public information,
+                    # so suppressing it would be theatre, not privacy.
                     source_chat_url = f"https://t.me/{msg.source_chat_username}"
                 elif msg.source_chat_title:
                     source_chat_label = msg.source_chat_title
@@ -292,6 +314,7 @@ class Distributor:
                 self._bot, msg, task.dest_chat_id, signature,
                 reply_to_message_id=task.reply_to_message_id,
                 sender_alias=sender_alias,
+                sender_alias_url=sender_alias_url,
                 redis=self._redis,
                 allow_paid_broadcast=allow_paid,
                 source_chat_label=source_chat_label,
@@ -455,6 +478,41 @@ class Distributor:
     async def invalidate_signature_cache(self) -> None:
         """Call after admin changes signature config so the new value takes effect immediately."""
         await self._redis.delete(_SIGNATURE_CACHE_KEY)
+
+    # ── Premium real-name attribution helper (alembic 010) ──────────────
+
+    async def _is_real_links_active(self, source_chat_id: int) -> bool:
+        """True iff the source chat has Premium real-link attribution enabled.
+
+        Two conditions must both hold:
+
+        - ``Chat.real_links_enabled`` — the source chat opted in via
+          ``/identity`` (chat-admin only in groups, premium-gated at the
+          command level).
+        - The chat is currently Premium — paid subscription or in trial.
+
+        We re-check the Premium status here (not just trust ``real_links_enabled``)
+        so a chat that toggled the flag during trial reverts to alias-to-bot
+        the moment trial expires, without requiring a manual flip-off.
+        Cheap because both lookups hit Redis caches in the common path.
+        """
+        from bot.services.subscription import is_premium
+
+        try:
+            async with async_session() as session:
+                chat_repo = ChatRepo(session)
+                chat = await chat_repo.get_chat(source_chat_id)
+            if chat is None or not chat.real_links_enabled:
+                return False
+            return await is_premium(self._redis, source_chat_id, chat.registered_at)
+        except Exception as e:
+            # Never let an attribution-resolution failure break message relay.
+            # Falling back to alias-to-bot is the safe default.
+            logger.debug(
+                "real_links_active check failed for chat %d: %s",
+                source_chat_id, e,
+            )
+            return False
 
     async def _log_send(
         self, msg: NormalizedMessage, dest_chat_id: int, dest_message_id: int

@@ -56,6 +56,12 @@ class NormalizedMessage:
 
     # Sender identity (None for channel posts without from_user)
     source_user_id: int | None = None
+    # 2026-04-26 (alembic 010 / real-name attribution Premium feature):
+    # Captured at normalize time so the distributor can build a public
+    # ``t.me/<username>`` link to the real sender when the source chat has
+    # ``real_links_enabled`` turned on.  ``None`` when the user has no
+    # public Telegram username (most users — handled gracefully downstream).
+    source_user_username: str | None = None
 
     # Source-chat attribution – populated when source_user_id is None
     # (channel posts, anonymous admin posts).  Used as the visible attribution
@@ -123,10 +129,18 @@ def normalize(message: Message) -> NormalizedMessage | None:
 
     if not is_anon:
         source_user_id: int | None = from_user.id
+        # ``from_user.username`` is None when the user has no public username.
+        # Carried forward so the distributor can build a t.me link if (and
+        # only if) real_links_enabled is on for this source chat.
+        raw_user_username = getattr(from_user, "username", None)
+        source_user_username: str | None = (
+            raw_user_username.lstrip("@") if raw_user_username else None
+        )
         source_chat_title: str | None = None
         source_chat_username: str | None = None
     else:
         source_user_id = None
+        source_user_username = None
         # Prefer sender_chat (set for anon admins and channel posts forwarded
         # to discussion groups); fall back to message.chat itself.
         attr_chat = sender_chat or message.chat
@@ -141,6 +155,7 @@ def normalize(message: Message) -> NormalizedMessage | None:
         source_chat_id=message.chat.id,
         source_message_id=message.message_id,
         source_user_id=source_user_id,
+        source_user_username=source_user_username,
         source_chat_title=source_chat_title,
         source_chat_username=source_chat_username,
         source_chat_type=getattr(message.chat, "type", None),

@@ -26,8 +26,14 @@ A Python Telegram bot built on **aiogram v3** that receives content from registe
 - **Per-chat control** — `/broadcast off out` pauses outgoing content; `/broadcast off in` pauses incoming content
 - **Resume anytime** — `/broadcast on out` and `/broadcast on in` to resume
 - **Premium-gated** — available during the free trial and for premium subscribers; paywalled after trial expiry
-- **Admin-only in groups** — in a group/supergroup, `/broadcast` and `/selfsend` require chat admin or creator status (`getChatMember` lookup); private chats are unrestricted
-- **Defaults on registration** — every newly added chat starts at `broadcast=on, selfsend=off`, regardless of who added the bot
+- **Admin-only in groups** — in a group/supergroup, `/broadcast`, `/selfsend`, and `/identity` require chat admin or creator status (`getChatMember` lookup); private chats are unrestricted
+- **Defaults on registration** — every newly added chat starts at `broadcast=on, selfsend=off, real_links=off`, regardless of who added the bot
+
+### Real-name Attribution (Premium, alembic 010)
+- **`/identity on|off`** — toggles whether the alias-tag entity attached to outbound messages targets the actual user / group profile (when ON) or the bot itself (when OFF, the long-standing default)
+- **Premium-gated for ON only** — `/identity off` always works; `/identity on` requires the source chat to be in trial or paid Premium. A chat dropping out of Premium silently reverts to alias-to-bot links without an explicit flip-off (re-checked at every send via `Distributor._is_real_links_active`)
+- **Edge cases handled** — users without a public Telegram username keep the alias-to-bot link (no `tg://user?id=` fallback to avoid brittle text-mention behaviour); private groups (no public username) keep the alias as plain text
+- **Admin-only in groups** — same gate as `/selfsend` and `/broadcast`
 
 ### Moderation & Aliases
 - **User aliases** — every user gets a persistent two-word pseudonym (e.g. `golden_arrow`) that appears as a clickable link to the bot on every redistributed message

@@ -164,3 +164,17 @@ class ChatRepo:
             update(Chat).where(Chat.chat_id == chat_id).values(is_destination=enabled)
         )
         await self._s.commit()
+
+    async def toggle_real_links(self, chat_id: int, enabled: bool) -> None:
+        """Toggle the Premium real-name attribution flag for a chat.
+
+        Caller is responsible for the Premium check; this method just
+        flips the column and is reused by the slash command and the
+        admin override path.
+        """
+        await self._s.execute(
+            update(Chat)
+            .where(Chat.chat_id == chat_id)
+            .values(real_links_enabled=enabled)
+        )
+        await self._s.commit()

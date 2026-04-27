@@ -22,6 +22,14 @@ class Chat(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_source: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_destination: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 2026-04-26 (alembic 010): Premium-gated.  When True for the source chat,
+    # the alias-tag entity attached to outbound messages targets the actual
+    # user / group profile (via t.me/<username>) instead of the bot itself.
+    # Off by default so the existing pseudonymous-by-default contract holds
+    # for free chats and for users who never opt in.
+    real_links_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
 
     registered_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False

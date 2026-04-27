@@ -9,10 +9,17 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from bot.config import settings
 from bot.db.base import Base
 
-# Import all models so they register on Base.metadata
+# Import all models so they register on Base.metadata.  Anything missing here
+# will be invisible to ``alembic revision --autogenerate`` and produce empty
+# diffs, so keep this list in sync with bot/models/.
 from bot.models.chat import Chat  # noqa: F401
 from bot.models.bot_config import BotConfig  # noqa: F401
 from bot.models.send_log import SendLog  # noqa: F401
+from bot.models.subscription import Subscription  # noqa: F401
+from bot.models.user_alias import UserAlias  # noqa: F401
+from bot.models.user_restriction import UserRestriction  # noqa: F401
+from bot.models.chat_alias import ChatAlias  # noqa: F401
+from bot.models.chat_restriction import ChatRestriction  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

@@ -74,9 +74,10 @@ def _register_middleware(dp: Dispatcher) -> None:
 
 
 async def _on_startup(bot: Bot, redis: aioredis.Redis, dp: Dispatcher) -> None:
-    """Run on startup – create tables if needed, start workers."""
+    """Run on startup – migrate schema, create any missing tables, start workers."""
     from bot.db.engine import engine
     from bot.db.base import Base
+    from bot.db.migrate import upgrade_to_head
 
     # Import models so they register on metadata
     from bot.models.chat import Chat  # noqa: F401
@@ -88,10 +89,21 @@ async def _on_startup(bot: Bot, redis: aioredis.Redis, dp: Dispatcher) -> None:
     from bot.models.chat_alias import ChatAlias  # noqa: F401  (alembic 008)
     from bot.models.chat_restriction import ChatRestriction  # noqa: F401  (alembic 008)
 
+    # 1. Apply any pending alembic migrations BEFORE touching tables.
+    #    create_all creates *missing tables* but never adds columns to
+    #    existing tables — so without this step, ALTER-style migrations
+    #    silently no-op and the bot crashes on the first request that
+    #    touches a new column.  Set DISABLE_AUTO_MIGRATE=1 to opt out
+    #    (e.g. when migrations run from a separate CI job).
+    await upgrade_to_head(engine)
+
+    # 2. Belt-and-braces: catch tables that exist in the model but never had
+    #    an alembic revision (e.g. dev databases stamped before a migration
+    #    landed).  No-op in any properly-migrated production DB.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    logger.info("Database tables ensured.")
+    logger.info("Database schema is up to date.")
 
     # Seed default config if empty
     from bot.db.engine import async_session
